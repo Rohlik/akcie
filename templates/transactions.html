@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Transakce - Prague Stock Tracker{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <section class="card">
+        <div class="card-header">
+            <h2>Historie transakcí</h2>
+            <a href="/" class="btn btn-secondary">Zpět na dashboard</a>
+        </div>
+        <div id="transactions-container">
+            <table id="transactions-table">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Typ</th>
+                        <th>Akcie</th>
+                        <th>Cena (CZK)</th>
+                        <th>Množství</th>
+                        <th>Celková hodnota</th>
+                    </tr>
+                </thead>
+                <tbody id="transactions-tbody">
+                    <tr>
+                        <td colspan="6" class="loading">Načítání transakcí...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Load transactions
+async function loadTransactions() {
+    try {
+        const response = await fetch('/api/transactions');
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load transactions');
+        }
+        
+        displayTransactions(data.transactions);
+    } catch (error) {
+        console.error('Error loading transactions:', error);
+        document.getElementById('transactions-tbody').innerHTML = 
+            '<tr><td colspan="6" class="loading">Chyba při načítání transakcí</td></tr>';
+    }
+}
+
+function displayTransactions(transactions) {
+    const tbody = document.getElementById('transactions-tbody');
+    
+    if (transactions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="loading">Žádné transakce</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = transactions.map(tx => {
+        const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
+        const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
+        const totalValue = tx.price * tx.quantity;
+        
+        return `
+            <tr>
+                <td>${tx.date}</td>
+                <td><span class="${typeClass}">${typeText}</span></td>
+                <td><strong>${tx.stock_name}</strong></td>
+                <td>${formatCurrency(tx.price)}</td>
+                <td>${formatNumber(tx.quantity)}</td>
+                <td>${formatCurrency(totalValue)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Format functions (same as in main.js)
+function formatCurrency(value) {
+    if (value === null || value === undefined) return '-';
+    return new Intl.NumberFormat('cs-CZ', {
+        style: 'currency',
+        currency: 'CZK',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }).format(value);
+}
+
+function formatNumber(value) {
+    if (value === null || value === undefined) return '-';
+    return new Intl.NumberFormat('cs-CZ').format(value);
+}
+
+// Load on page load
+document.addEventListener('DOMContentLoaded', loadTransactions);
+</script>
+{% endblock %}
+

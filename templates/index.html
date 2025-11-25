@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Transaction Form -->
+    <section class="card">
+        <h2>Přidat transakci</h2>
+        <form id="transaction-form">
+            <div class="form-group">
+                <label for="type">Typ transakce:</label>
+                <select id="type" name="type" required>
+                    <option value="buy">Nákup</option>
+                    <option value="sell">Prodej</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="stock_name">Název akcie:</label>
+                <input type="text" id="stock_name" name="stock_name" placeholder="např. TABAK.PR" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="date">Datum:</label>
+                <input type="date" id="date" name="date" required>
+            </div>
+            
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="price">Cena (CZK):</label>
+                    <input type="number" id="price" name="price" step="0.01" min="0" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="quantity">Množství:</label>
+                    <input type="number" id="quantity" name="quantity" min="1" required>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Přidat transakci</button>
+        </form>
+    </section>
+    
+    <!-- Tax Information Card -->
+    <section class="card tax-info">
+        <h2>Daňové informace</h2>
+        <div id="tax-info-content">
+            <div class="info-item">
+                <span class="label">Prodeje v tomto roce:</span>
+                <span class="value" id="current-year-sales">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">Zbývající daňově osvobozená kapacita:</span>
+                <span class="value highlight" id="remaining-capacity">-</span>
+            </div>
+            <div class="info-item">
+                <span class="label">Hodnota akcií držených >3 roky:</span>
+                <span class="value highlight-green" id="three-year-value">-</span>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Holdings Table -->
+    <section class="card">
+        <div class="card-header">
+            <h2>Portfolio</h2>
+            <button id="update-prices-btn" class="btn btn-secondary">Aktualizovat ceny</button>
+        </div>
+        <div id="holdings-container">
+            <table id="holdings-table">
+                <thead>
+                    <tr>
+                        <th>Akcie</th>
+                        <th>Množství</th>
+                        <th>Množství >3 roky</th>
+                        <th>Průměrná nákupní cena</th>
+                        <th>Aktuální cena</th>
+                        <th>Celková hodnota</th>
+                        <th>Zisk/Ztráta</th>
+                    </tr>
+                </thead>
+                <tbody id="holdings-tbody">
+                    <tr>
+                        <td colspan="7" class="loading">Načítání dat...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    
+    <!-- Profit/Loss Visualization -->
+    <section class="card">
+        <h2>Přehled zisků a ztrát</h2>
+        <div id="profit-loss-container">
+            <table id="profit-loss-table">
+                <thead>
+                    <tr>
+                        <th>Akcie</th>
+                        <th>Celková hodnota</th>
+                        <th>Celkové náklady</th>
+                        <th>Zisk/Ztráta</th>
+                        <th>Zisk/Ztráta %</th>
+                    </tr>
+                </thead>
+                <tbody id="profit-loss-tbody">
+                    <tr>
+                        <td colspan="5" class="loading">Načítání dat...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
