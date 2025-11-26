@@ -67,9 +67,9 @@ After=network.target
 [Service]
 Type=simple
 User=your-username
-WorkingDirectory=/home/tro/hratky/akcie
-Environment="PATH=/home/tro/hratky/akcie/venv/bin"
-ExecStart=/home/tro/hratky/akcie/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 2 app:app
+WorkingDirectory=/var/www/html/akcie
+Environment="PATH=/var/www/html/akcie/venv/bin"
+ExecStart=/var/www/html/akcie/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 1 app:app
 Restart=always
 RestartSec=10
 
