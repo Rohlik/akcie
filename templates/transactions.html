@@ -18,12 +18,13 @@
                         <th>Akcie</th>
                         <th>Cena (CZK)</th>
                         <th>Množství</th>
+                        <th>Poplatky (CZK)</th>
                         <th>Celková hodnota</th>
                     </tr>
                 </thead>
                 <tbody id="transactions-tbody">
                     <tr>
-                        <td colspan="6" class="loading">Načítání transakcí...</td>
+                        <td colspan="7" class="loading">Načítání transakcí...</td>
                     </tr>
                 </tbody>
             </table>
@@ -48,7 +49,7 @@ async function loadTransactions() {
     } catch (error) {
         console.error('Error loading transactions:', error);
         document.getElementById('transactions-tbody').innerHTML = 
-            '<tr><td colspan="6" class="loading">Chyba při načítání transakcí</td></tr>';
+            '<tr><td colspan="7" class="loading">Chyba při načítání transakcí</td></tr>';
     }
 }
 
@@ -56,14 +57,17 @@ function displayTransactions(transactions) {
     const tbody = document.getElementById('transactions-tbody');
     
     if (transactions.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="loading">Žádné transakce</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">Žádné transakce</td></tr>';
         return;
     }
     
     tbody.innerHTML = transactions.map(tx => {
         const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
         const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
-        const totalValue = tx.price * tx.quantity;
+        const fees = tx.fees || 0;
+        const totalValue = tx.type === 'buy' 
+            ? (tx.price * tx.quantity) + fees  // Buy: price + fees
+            : (tx.price * tx.quantity) - fees; // Sell: price - fees
         
         return `
             <tr>
@@ -72,6 +76,7 @@ function displayTransactions(transactions) {
                 <td><strong>${tx.stock_name}</strong></td>
                 <td>${formatCurrency(tx.price)}</td>
                 <td>${formatNumber(tx.quantity)}</td>
+                <td>${fees > 0 ? formatCurrency(fees) : '-'}</td>
                 <td>${formatCurrency(totalValue)}</td>
             </tr>
         `;

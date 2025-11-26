@@ -34,6 +34,7 @@ def add_transaction_api():
         date = data.get('date')
         price = float(data.get('price'))
         quantity = int(data.get('quantity'))
+        fees = float(data.get('fees', 0.0)) or 0.0  # Default to 0 if not provided
         
         # Validate
         if transaction_type not in ['buy', 'sell']:
@@ -42,13 +43,16 @@ def add_transaction_api():
         if not stock_name or not date or price <= 0 or quantity <= 0:
             return jsonify({'error': 'Invalid input data'}), 400
         
+        if fees < 0:
+            return jsonify({'error': 'Fees cannot be negative'}), 400
+        
         # Validate date format
         try:
             datetime.strptime(date, '%Y-%m-%d')
         except ValueError:
             return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
         
-        transaction_id = add_transaction(transaction_type, stock_name, date, price, quantity)
+        transaction_id = add_transaction(transaction_type, stock_name, date, price, quantity, fees)
         
         return jsonify({
             'success': True,
@@ -201,19 +205,26 @@ def get_yearly_profit_loss_api():
             tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
             tx_price = tx['price']
             tx_quantity = tx['quantity']
+            tx_fees = tx.get('fees', 0.0) or 0.0
             year = tx_date.year
             
             if tx['type'] == 'buy':
-                # Add purchase to holdings
+                # Calculate effective price per share including fees
+                # Cost basis = (price * quantity) + fees
+                cost_basis = (tx_price * tx_quantity) + tx_fees
+                effective_price = cost_basis / tx_quantity if tx_quantity > 0 else tx_price
+                
+                # Add purchase to holdings with effective price (including fees)
                 holdings[stock_name].append({
                     'date': tx_date,
-                    'price': tx_price,
+                    'price': effective_price,
                     'quantity': tx_quantity
                 })
             elif tx['type'] == 'sell':
-                # Calculate sales value
-                sales_value = tx_price * tx_quantity
-                yearly_stats[year]['total_sales'] += sales_value
+                # Calculate net sales value (revenue - fees)
+                # Net sale value = (price * quantity) - fees
+                net_sales_value = (tx_price * tx_quantity) - tx_fees
+                yearly_stats[year]['total_sales'] += net_sales_value
                 
                 # Apply FIFO to calculate cost basis
                 remaining_to_sell = tx_quantity

@@ -149,6 +149,7 @@ async function loadStockHistory(stockName, contentId) {
                         <th>Typ</th>
                         <th>Cena (CZK)</th>
                         <th>Množství</th>
+                        <th>Poplatky (CZK)</th>
                         <th>Celková hodnota</th>
                     </tr>
                 </thead>
@@ -156,13 +157,17 @@ async function loadStockHistory(stockName, contentId) {
                     ${transactions.map(tx => {
                         const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
                         const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
-                        const totalValue = tx.price * tx.quantity;
+                        const fees = tx.fees || 0;
+                        const totalValue = tx.type === 'buy' 
+                            ? (tx.price * tx.quantity) + fees  // Buy: price + fees
+                            : (tx.price * tx.quantity) - fees; // Sell: price - fees
                         return `
                             <tr>
                                 <td>${tx.date}</td>
                                 <td><span class="${typeClass}">${typeText}</span></td>
                                 <td>${formatCurrency(tx.price)}</td>
                                 <td>${formatNumber(tx.quantity)}</td>
+                                <td>${fees > 0 ? formatCurrency(fees) : '-'}</td>
                                 <td>${formatCurrency(totalValue)}</td>
                             </tr>
                         `;
@@ -302,12 +307,16 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         }
     }
     
+    const feesInput = document.getElementById('fees');
+    const fees = feesInput ? (parseFloat(feesInput.value) || 0) : 0;
+    
     const formData = {
         type: type,
         stock_name: stockNameInput.value.trim(),
         date: dateValue,
         price: parseFloat(document.getElementById('price').value),
-        quantity: parseInt(document.getElementById('quantity').value)
+        quantity: parseInt(document.getElementById('quantity').value),
+        fees: fees
     };
     
     try {

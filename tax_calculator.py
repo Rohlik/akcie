@@ -5,7 +5,7 @@ from config import Config
 def calculate_holdings(transactions):
     """
     Apply FIFO to determine current holdings.
-    Returns a list of holdings with purchase date, price, and remaining quantity.
+    Returns a list of holdings with purchase date, price (including fees), and remaining quantity.
     """
     holdings = defaultdict(list)  # stock_name -> list of (date, price, quantity)
     
@@ -15,12 +15,19 @@ def calculate_holdings(transactions):
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
         tx_price = tx['price']
         tx_quantity = tx['quantity']
+        tx_fees = tx.get('fees', 0.0) or 0.0  # Handle None or missing fees
         
         if tx_type == 'buy':
-            # Add purchase to holdings
+            # Calculate effective price per share including fees
+            # Cost basis = (price * quantity) + fees
+            # Effective price per share = cost_basis / quantity
+            cost_basis = (tx_price * tx_quantity) + tx_fees
+            effective_price = cost_basis / tx_quantity if tx_quantity > 0 else tx_price
+            
+            # Add purchase to holdings with effective price (including fees)
             holdings[stock_name].append({
                 'date': tx_date,
-                'price': tx_price,
+                'price': effective_price,
                 'quantity': tx_quantity
             })
         elif tx_type == 'sell':
@@ -86,8 +93,9 @@ def get_three_year_holdings(holdings, current_date=None):
 
 def calculate_current_year_sales(transactions, current_year=None):
     """
-    Sum sell transaction values in the current tax year.
+    Sum sell transaction values in the current tax year (net of fees).
     Tax year is January 1 to December 31.
+    For sell transactions: revenue = (price * quantity) - fees
     """
     if current_year is None:
         current_year = datetime.now().year
@@ -100,7 +108,9 @@ def calculate_current_year_sales(transactions, current_year=None):
         if tx['type'] == 'sell':
             tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
             if year_start <= tx_date <= year_end:
-                total_sales += tx['price'] * tx['quantity']
+                tx_fees = tx.get('fees', 0.0) or 0.0
+                # Net sale value = (price * quantity) - fees
+                total_sales += (tx['price'] * tx['quantity']) - tx_fees
     
     return total_sales
 

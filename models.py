@@ -25,9 +25,18 @@ def init_db():
             date DATE NOT NULL,
             price REAL NOT NULL,
             quantity INTEGER NOT NULL,
+            fees REAL DEFAULT 0.0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    
+    # Migrate existing database: add fees column if it doesn't exist
+    try:
+        cursor.execute('ALTER TABLE transactions ADD COLUMN fees REAL DEFAULT 0.0')
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists, ignore
+        pass
     
     # Create stock_prices table
     cursor.execute('''
@@ -42,14 +51,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-def add_transaction(transaction_type, stock_name, date, price, quantity):
+def add_transaction(transaction_type, stock_name, date, price, quantity, fees=0.0):
     """Add a new transaction"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO transactions (type, stock_name, date, price, quantity)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (transaction_type, stock_name, date, price, quantity))
+        INSERT INTO transactions (type, stock_name, date, price, quantity, fees)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (transaction_type, stock_name, date, price, quantity, fees))
     conn.commit()
     transaction_id = cursor.lastrowid
     conn.close()
