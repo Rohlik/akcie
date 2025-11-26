@@ -302,6 +302,81 @@ footer {
     border: 1px solid #fecaca;
 }
 
+/* Expandable Holdings History */
+.stock-name-clickable {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.expand-icon {
+    font-size: 0.75rem;
+    transition: transform 0.2s;
+}
+
+.history-row {
+    background-color: #f8fafc;
+}
+
+.history-cell {
+    padding: 1rem !important;
+    background-color: #f8fafc;
+}
+
+.history-content {
+    padding: 1rem;
+    background-color: white;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.history-content h4 {
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.5rem;
+}
+
+.history-table th {
+    background-color: var(--bg-color);
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.history-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.9rem;
+}
+
+.history-table tbody tr:hover {
+    background-color: var(--bg-color);
+}
+
+/* Stock name select dropdown */
+#stock_name_select {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+#stock_name_select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
 /* Utility Classes */
 .text-right {
     text-align: right;

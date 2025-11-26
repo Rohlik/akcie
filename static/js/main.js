@@ -53,7 +53,7 @@ async function loadHoldings() {
     }
 }
 
-// Display holdings in table
+// Display holdings in table with expandable transaction history
 function displayHoldings(holdings) {
     const tbody = document.getElementById('holdings-tbody');
     
@@ -62,16 +62,22 @@ function displayHoldings(holdings) {
         return;
     }
     
-    tbody.innerHTML = holdings.map(holding => {
+    tbody.innerHTML = holdings.map((holding, index) => {
         const isThreeYear = holding.three_year_quantity > 0;
         const rowClass = isThreeYear ? 'three-year-holding' : '';
         const profitLossClass = holding.profit_loss !== null 
             ? (holding.profit_loss >= 0 ? 'profit' : 'loss') 
             : '';
+        const rowId = `holding-row-${index}`;
+        const historyId = `history-${index}`;
         
         return `
-            <tr class="${rowClass}">
-                <td><strong>${holding.stock_name}</strong></td>
+            <tr class="${rowClass} holding-row" data-stock="${holding.stock_name}" id="${rowId}">
+                <td>
+                    <strong class="stock-name-clickable" style="cursor: pointer; user-select: none;" onclick="toggleHistory('${historyId}', '${holding.stock_name}')">
+                        ${holding.stock_name} <span class="expand-icon">▼</span>
+                    </strong>
+                </td>
                 <td>${formatNumber(holding.quantity)}</td>
                 <td class="highlight-green">${formatNumber(holding.three_year_quantity)}</td>
                 <td>${formatCurrency(holding.average_purchase_price)}</td>
@@ -81,9 +87,96 @@ function displayHoldings(holdings) {
                     ${holding.profit_loss !== null ? formatCurrency(holding.profit_loss) : '-'}
                 </td>
             </tr>
+            <tr class="history-row" id="${historyId}" style="display: none;">
+                <td colspan="7" class="history-cell">
+                    <div class="history-content">
+                        <h4>Historie transakcí pro ${holding.stock_name}</h4>
+                        <div id="history-content-${index}" class="loading">Načítání...</div>
+                    </div>
+                </td>
+            </tr>
         `;
     }).join('');
 }
+
+// Toggle transaction history (global function for onclick)
+window.toggleHistory = async function(historyId, stockName) {
+    const historyRow = document.getElementById(historyId);
+    const isVisible = historyRow.style.display !== 'none';
+    
+    if (isVisible) {
+        historyRow.style.display = 'none';
+        // Update icon
+        const icon = historyRow.previousElementSibling.querySelector('.expand-icon');
+        if (icon) icon.textContent = '▼';
+    } else {
+        historyRow.style.display = 'table-row';
+        // Update icon
+        const icon = historyRow.previousElementSibling.querySelector('.expand-icon');
+        if (icon) icon.textContent = '▲';
+        
+        // Load history if not loaded yet
+        const contentDiv = historyRow.querySelector('.history-content div');
+        if (contentDiv && contentDiv.textContent === 'Načítání...') {
+            await loadStockHistory(stockName, contentDiv.id);
+        }
+    }
+}
+
+// Load transaction history for a specific stock
+async function loadStockHistory(stockName, contentId) {
+    try {
+        const response = await fetch(`/api/transactions?stock=${encodeURIComponent(stockName)}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load history');
+        }
+        
+        const transactions = data.transactions || [];
+        const contentDiv = document.getElementById(contentId);
+        
+        if (transactions.length === 0) {
+            contentDiv.innerHTML = '<p>Žádné transakce pro tuto akcii.</p>';
+            return;
+        }
+        
+        const historyHtml = `
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Typ</th>
+                        <th>Cena (CZK)</th>
+                        <th>Množství</th>
+                        <th>Celková hodnota</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${transactions.map(tx => {
+                        const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
+                        const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
+                        const totalValue = tx.price * tx.quantity;
+                        return `
+                            <tr>
+                                <td>${tx.date}</td>
+                                <td><span class="${typeClass}">${typeText}</span></td>
+                                <td>${formatCurrency(tx.price)}</td>
+                                <td>${formatNumber(tx.quantity)}</td>
+                                <td>${formatCurrency(totalValue)}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        contentDiv.innerHTML = historyHtml;
+    } catch (error) {
+        console.error('Error loading stock history:', error);
+        document.getElementById(contentId).innerHTML = '<p style="color: red;">Chyba při načítání historie.</p>';
+    }
+};
 
 // Display profit/loss table
 function displayProfitLoss(holdings) {
@@ -144,13 +237,60 @@ async function loadTaxInfo() {
     }
 }
 
+// Update stock name field based on transaction type
+function updateStockNameField() {
+    const type = document.getElementById('type').value;
+    const textInput = document.getElementById('stock_name');
+    const selectInput = document.getElementById('stock_name_select');
+    
+    if (type === 'sell') {
+        textInput.style.display = 'none';
+        textInput.removeAttribute('required');
+        selectInput.style.display = 'block';
+        selectInput.setAttribute('required', 'required');
+        loadAvailableStocks();
+    } else {
+        textInput.style.display = 'block';
+        textInput.setAttribute('required', 'required');
+        selectInput.style.display = 'none';
+        selectInput.removeAttribute('required');
+    }
+}
+
+// Load available stocks for sell dropdown
+async function loadAvailableStocks() {
+    try {
+        const response = await fetch('/api/holdings');
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load holdings');
+        }
+        
+        const selectInput = document.getElementById('stock_name_select');
+        const availableStocks = data.holdings.filter(h => h.quantity > 0);
+        
+        selectInput.innerHTML = '<option value="">Vyberte akcii...</option>' +
+            availableStocks.map(h => 
+                `<option value="${h.stock_name}">${h.stock_name} (${formatNumber(h.quantity)} ks)</option>`
+            ).join('');
+    } catch (error) {
+        console.error('Error loading available stocks:', error);
+    }
+}
+
 // Handle transaction form submission
 document.getElementById('transaction-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     
+    const type = document.getElementById('type').value;
+    const stockNameInput = type === 'sell' 
+        ? document.getElementById('stock_name_select')
+        : document.getElementById('stock_name');
+    
     const formData = {
-        type: document.getElementById('type').value,
-        stock_name: document.getElementById('stock_name').value.trim(),
+        type: type,
+        stock_name: stockNameInput.value.trim(),
         date: document.getElementById('date').value,
         price: parseFloat(document.getElementById('price').value),
         quantity: parseInt(document.getElementById('quantity').value)
@@ -175,9 +315,10 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         
         // Reset form
         document.getElementById('transaction-form').reset();
+        updateStockNameField();
         
         // Reload data
-        await Promise.all([loadHoldings(), loadTaxInfo()]);
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
         
     } catch (error) {
         console.error('Error adding transaction:', error);
@@ -219,16 +360,77 @@ document.getElementById('update-prices-btn').addEventListener('click', async () 
     }
 });
 
-// Set today's date as default in date picker
+// Load yearly profit/loss
+async function loadYearlyProfitLoss() {
+    try {
+        const response = await fetch('/api/yearly-profit-loss');
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load yearly profit/loss');
+        }
+        
+        displayYearlyProfitLoss(data.yearly_data);
+    } catch (error) {
+        console.error('Error loading yearly profit/loss:', error);
+        document.getElementById('yearly-profit-loss-tbody').innerHTML = 
+            '<tr><td colspan="5" class="loading">Chyba při načítání dat</td></tr>';
+    }
+}
+
+// Display yearly profit/loss
+function displayYearlyProfitLoss(yearlyData) {
+    const tbody = document.getElementById('yearly-profit-loss-tbody');
+    
+    if (!yearlyData || yearlyData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="loading">Žádné prodeje</td></tr>';
+        return;
+    }
+    
+    // Sort by year descending
+    yearlyData.sort((a, b) => b.year - a.year);
+    
+    tbody.innerHTML = yearlyData.map(yearData => {
+        const profitLoss = yearData.profit_loss || 0;
+        const profitLossPercent = yearData.total_cost > 0 
+            ? (profitLoss / yearData.total_cost) * 100 
+            : 0;
+        const profitLossClass = profitLoss >= 0 ? 'profit' : 'loss';
+        
+        return `
+            <tr>
+                <td><strong>${yearData.year}</strong></td>
+                <td>${formatCurrency(yearData.total_sales)}</td>
+                <td>${formatCurrency(yearData.total_cost)}</td>
+                <td class="${profitLossClass}">${formatCurrency(profitLoss)}</td>
+                <td class="${profitLossClass}">${formatPercentage(profitLossPercent)}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Set today's date as default in date picker and configure calendar
 document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('date');
     if (dateInput) {
         const today = new Date().toISOString().split('T')[0];
         dateInput.value = today;
+        // Set locale for Czech calendar (Monday first)
+        dateInput.setAttribute('lang', 'cs-CZ');
+        // Note: HTML5 date input first day of week depends on browser locale settings
+        // For consistent Monday-first behavior, ensure system locale is set to Czech (cs-CZ)
+    }
+    
+    // Setup transaction type change handler
+    const typeSelect = document.getElementById('type');
+    if (typeSelect) {
+        typeSelect.addEventListener('change', updateStockNameField);
+        updateStockNameField(); // Initialize
     }
     
     // Load initial data
     loadHoldings();
     loadTaxInfo();
+    loadYearlyProfitLoss();
 });
 

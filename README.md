@@ -5,18 +5,23 @@ Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou o
 ## Funkce
 
 - **Sledování transakcí**: Přidávání nákupů a prodejů akcií
+  - Při prodeji automatický výběr z dostupných akcií v portfoliu
 - **FIFO kalkulace**: Automatický výpočet držených akcií pomocí metody FIFO
+- **Historie transakcí**: Rozklikávací historie transakcí pro každou akcii v portfoliu
 - **Daňová optimalizace**:
   - Zobrazení zbývající daňově osvobozené kapacita (100 000 Kč ročně)
   - Zvýraznění akcií držených déle než 3 roky (vždy daňově osvobozené)
 - **Aktuální ceny**: Načítání aktuálních cen z Yahoo Finance
-- **Vizualizace zisků/ztrát**: Přehled zisků a ztrát pro každou akcii
+- **Vizualizace zisků/ztrát**: 
+  - Přehled zisků a ztrát pro každou akcii v portfoliu
+  - Přehled zisků/ztrát podle kalendářního roku pro prodané akcie
+- **Český kalendář**: Kalendářní výběr začíná pondělím (český standard)
 
 ## Požadavky
 
 - **Python 3.8 nebo novější** (doporučeno Python 3.9+)
-- Flask 3.0.0
-- yfinance 0.2.28
+- Flask 3.1.2
+- yfinance 0.2.66
 
 ## Instalace
 
@@ -37,6 +42,8 @@ pip install -r requirements.txt
 
 ## Spuštění
 
+### Vývojové prostředí
+
 1. Aktivujte virtuální prostředí (pokud ještě není aktivní)
 
 2. Spusťte Flask aplikaci:
@@ -46,18 +53,67 @@ python app.py
 
 3. Otevřete prohlížeč na adrese: `http://localhost:5000`
 
+**Poznámka:** Flask zobrazí varování o vývojovém serveru. To je normální pro vývoj. Pro produkční nasazení použijte produkční WSGI server (viz níže).
+
+### Produkční nasazení (trvalé spuštění)
+
+Pro trvalé spuštění aplikace použijte systemd service. Vytvořte soubor `/etc/systemd/system/prague-stock-tracker.service`:
+
+```ini
+[Unit]
+Description=Prague Stock Exchange Tracker
+After=network.target
+
+[Service]
+Type=simple
+User=your-username
+WorkingDirectory=/home/tro/hratky/akcie
+Environment="PATH=/home/tro/hratky/akcie/venv/bin"
+ExecStart=/home/tro/hratky/akcie/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 2 app:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Nainstalujte gunicorn:
+```bash
+pip install gunicorn
+```
+
+Aktivujte a spusťte službu:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable prague-stock-tracker
+sudo systemctl start prague-stock-tracker
+```
+
+Kontrola stavu:
+```bash
+sudo systemctl status prague-stock-tracker
+```
+
+**Alternativa:** Můžete také použít jiné WSGI servery jako uWSGI nebo Waitress.
+
 ## Použití
 
 ### Přidání transakce
 
 1. Vyplňte formulář:
    - Typ transakce (Nákup/Prodej)
-   - Název akcie (např. TABAK.PR)
-   - Datum transakce
+     - Při výběru "Prodej" se zobrazí výběr dostupných akcií z portfolia
+   - Název akcie (pro nákup zadejte ručně, pro prodej vyberte z rozbalovacího seznamu)
+   - Datum transakce (kalendář začíná pondělím)
    - Cena v CZK
    - Množství
 
 2. Klikněte na "Přidat transakci"
+
+### Zobrazení historie transakcí
+
+- Klikněte na název akcie v tabulce Portfolio pro zobrazení historie všech transakcí pro danou akcii
+- Historie se zobrazí jako rozbalovací sekce pod řádkem akcie
 
 ### Aktualizace cen
 

@@ -169,10 +169,91 @@ def update_prices_api():
 
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions_api():
-    """List all transactions"""
+    """List all transactions, optionally filtered by stock"""
     try:
+        stock_name = request.args.get('stock')
         transactions = get_all_transactions()
+        
+        if stock_name:
+            transactions = [tx for tx in transactions if tx['stock_name'] == stock_name]
+        
         return jsonify({'transactions': transactions}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/yearly-profit-loss', methods=['GET'])
+def get_yearly_profit_loss_api():
+    """Calculate profit/loss per calendar year for sold stocks using FIFO"""
+    try:
+        from collections import defaultdict
+        
+        transactions = get_all_transactions()
+        
+        # Sort transactions by date
+        sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
+        
+        # Track holdings using FIFO
+        holdings = defaultdict(list)  # stock_name -> list of (date, price, quantity)
+        yearly_stats = defaultdict(lambda: {'total_sales': 0, 'total_cost': 0})
+        
+        for tx in sorted_transactions:
+            stock_name = tx['stock_name']
+            tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
+            tx_price = tx['price']
+            tx_quantity = tx['quantity']
+            year = tx_date.year
+            
+            if tx['type'] == 'buy':
+                # Add purchase to holdings
+                holdings[stock_name].append({
+                    'date': tx_date,
+                    'price': tx_price,
+                    'quantity': tx_quantity
+                })
+            elif tx['type'] == 'sell':
+                # Calculate sales value
+                sales_value = tx_price * tx_quantity
+                yearly_stats[year]['total_sales'] += sales_value
+                
+                # Apply FIFO to calculate cost basis
+                remaining_to_sell = tx_quantity
+                stock_holdings = holdings[stock_name]
+                stock_holdings.sort(key=lambda x: x['date'])
+                
+                i = 0
+                while remaining_to_sell > 0 and i < len(stock_holdings):
+                    holding = stock_holdings[i]
+                    purchase_date = holding['date']
+                    
+                    # Only use holdings purchased before or on sale date
+                    if purchase_date <= tx_date:
+                        if holding['quantity'] <= remaining_to_sell:
+                            # This purchase is fully sold
+                            yearly_stats[year]['total_cost'] += holding['quantity'] * holding['price']
+                            remaining_to_sell -= holding['quantity']
+                            stock_holdings.pop(i)
+                        else:
+                            # Partial sale of this purchase
+                            yearly_stats[year]['total_cost'] += remaining_to_sell * holding['price']
+                            holding['quantity'] -= remaining_to_sell
+                            remaining_to_sell = 0
+                    i += 1
+        
+        # Build response
+        yearly_data = []
+        for year in sorted(yearly_stats.keys(), reverse=True):
+            stats = yearly_stats[year]
+            profit_loss = stats['total_sales'] - stats['total_cost']
+            
+            yearly_data.append({
+                'year': year,
+                'total_sales': stats['total_sales'],
+                'total_cost': stats['total_cost'],
+                'profit_loss': profit_loss
+            })
+        
+        return jsonify({'yearly_data': yearly_data}), 200
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
