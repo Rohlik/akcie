@@ -288,10 +288,24 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         ? document.getElementById('stock_name_select')
         : document.getElementById('stock_name');
     
+    const dateInput = document.getElementById('date');
+    // Get ISO date format (YYYY-MM-DD) from data attribute or parse from DD.MM.YYYY
+    let dateValue = dateInput.getAttribute('data-iso-date');
+    if (!dateValue) {
+        // Fallback: parse DD.MM.YYYY format
+        const dateStr = dateInput.value;
+        const parts = dateStr.split('.');
+        if (parts.length === 3) {
+            dateValue = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        } else {
+            dateValue = dateInput.value; // Use as-is if format is different
+        }
+    }
+    
     const formData = {
         type: type,
         stock_name: stockNameInput.value.trim(),
-        date: document.getElementById('date').value,
+        date: dateValue,
         price: parseFloat(document.getElementById('price').value),
         quantity: parseInt(document.getElementById('quantity').value)
     };
@@ -315,6 +329,11 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         
         // Reset form
         document.getElementById('transaction-form').reset();
+        // Reset date picker
+        const dateInput = document.getElementById('date');
+        if (dateInput && dateInput._flatpickr) {
+            dateInput._flatpickr.setDate(new Date(), false);
+        }
         updateStockNameField();
         
         // Reload data
@@ -413,12 +432,44 @@ function displayYearlyProfitLoss(yearlyData) {
 document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('date');
     if (dateInput) {
-        const today = new Date().toISOString().split('T')[0];
-        dateInput.value = today;
-        // Set locale for Czech calendar (Monday first)
-        dateInput.setAttribute('lang', 'cs-CZ');
-        // Note: HTML5 date input first day of week depends on browser locale settings
-        // For consistent Monday-first behavior, ensure system locale is set to Czech (cs-CZ)
+        // Initialize Flatpickr with Czech locale and Monday as first day
+        flatpickr(dateInput, {
+            locale: 'cs',
+            dateFormat: 'd.m.Y',
+            altInput: false,
+            altFormat: 'd.m.Y',
+            firstDayOfWeek: 1, // Monday
+            defaultDate: new Date(),
+            allowInput: true,
+            parseDate: (datestr, format) => {
+                // Parse DD.MM.YYYY format
+                const parts = datestr.split('.');
+                if (parts.length === 3) {
+                    const day = parseInt(parts[0], 10);
+                    const month = parseInt(parts[1], 10) - 1; // Month is 0-indexed
+                    const year = parseInt(parts[2], 10);
+                    return new Date(year, month, day);
+                }
+                return null;
+            },
+            formatDate: (date, format) => {
+                // Format as DD.MM.YYYY
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}.${month}.${year}`;
+            },
+            onChange: function(selectedDates, dateStr, instance) {
+                // Convert to YYYY-MM-DD format for form submission
+                if (selectedDates.length > 0) {
+                    const date = selectedDates[0];
+                    const year = date.getFullYear();
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    dateInput.setAttribute('data-iso-date', `${year}-${month}-${day}`);
+                }
+            }
+        });
     }
     
     // Setup transaction type change handler

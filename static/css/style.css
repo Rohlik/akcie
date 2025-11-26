@@ -101,6 +101,7 @@ label {
 input[type="text"],
 input[type="number"],
 input[type="date"],
+input[type="text"].flatpickr-input,
 select {
     width: 100%;
     padding: 0.75rem;
@@ -375,6 +376,44 @@ footer {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+/* Flatpickr Calendar Styling */
+.flatpickr-calendar {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+}
+
+.flatpickr-day.selected,
+.flatpickr-day.startRange,
+.flatpickr-day.endRange {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.flatpickr-day.selected:hover,
+.flatpickr-day.startRange:hover,
+.flatpickr-day.endRange:hover {
+    background: #1e40af;
+    border-color: #1e40af;
+}
+
+.flatpickr-day:hover {
+    background: var(--bg-color);
+}
+
+.flatpickr-weekday {
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+.flatpickr-months .flatpickr-month {
+    color: var(--text-color);
+}
+
+.flatpickr-current-month {
+    font-weight: 600;
 }
 
 /* Utility Classes */
