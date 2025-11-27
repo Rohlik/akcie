@@ -362,6 +362,64 @@ footer {
     background-color: var(--bg-color);
 }
 
+.history-table tbody tr.edit-mode {
+    background-color: #fef3c7;
+}
+
+.history-table tbody tr.edit-mode td {
+    padding: 0.5rem;
+}
+
+.history-table tbody tr.edit-mode input {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.9rem;
+    width: 100%;
+}
+
+.history-table tbody tr.edit-mode input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+/* Edit buttons */
+.btn-edit, .btn-save, .btn-cancel {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    font-size: 1rem;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    margin: 0 0.25rem;
+}
+
+.btn-edit:hover {
+    background-color: var(--bg-color);
+}
+
+.btn-save {
+    color: var(--success-color);
+}
+
+.btn-save:hover {
+    background-color: #d1fae5;
+}
+
+.btn-cancel {
+    color: var(--danger-color);
+}
+
+.btn-cancel:hover {
+    background-color: #fee2e2;
+}
+
+.icon-pencil {
+    font-size: 0.9rem;
+}
+
 /* Stock name select dropdown */
 #stock_name_select {
     width: 100%;

@@ -76,6 +76,31 @@ def get_all_transactions():
     conn.close()
     return transactions
 
+def get_transaction(transaction_id):
+    """Get a single transaction by ID"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM transactions WHERE id = ?
+    ''', (transaction_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def update_transaction(transaction_id, date, price, quantity, fees):
+    """Update an existing transaction"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE transactions
+        SET date = ?, price = ?, quantity = ?, fees = ?
+        WHERE id = ?
+    ''', (date, price, quantity, fees, transaction_id))
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    return success
+
 def update_stock_price(stock_name, current_price, status='available'):
     """Update or insert stock price"""
     conn = get_db()

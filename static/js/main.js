@@ -151,24 +151,31 @@ async function loadStockHistory(stockName, contentId) {
                         <th>Množství</th>
                         <th>Poplatky (CZK)</th>
                         <th>Celková hodnota</th>
+                        <th style="width: 80px;">Akce</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${transactions.map(tx => {
+                    ${transactions.map((tx, index) => {
                         const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
                         const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
                         const fees = tx.fees || 0;
                         const totalValue = tx.type === 'buy' 
                             ? (tx.price * tx.quantity) + fees  // Buy: price + fees
                             : (tx.price * tx.quantity) - fees; // Sell: price - fees
+                        const rowId = `tx-row-${tx.id}`;
                         return `
-                            <tr>
-                                <td>${tx.date}</td>
+                            <tr id="${rowId}" data-tx-id="${tx.id}" data-tx-stock="${stockName}" data-tx-type="${tx.type}">
+                                <td class="tx-date">${tx.date}</td>
                                 <td><span class="${typeClass}">${typeText}</span></td>
-                                <td>${formatCurrency(tx.price)}</td>
-                                <td>${formatNumber(tx.quantity)}</td>
-                                <td>${fees > 0 ? formatCurrency(fees) : '-'}</td>
-                                <td>${formatCurrency(totalValue)}</td>
+                                <td class="tx-price">${formatCurrency(tx.price)}</td>
+                                <td class="tx-quantity">${formatNumber(tx.quantity)}</td>
+                                <td class="tx-fees">${fees > 0 ? formatCurrency(fees) : '-'}</td>
+                                <td class="tx-total">${formatCurrency(totalValue)}</td>
+                                <td>
+                                    <button class="btn-edit" onclick="editTransaction(${tx.id}, '${stockName}', '${contentId}')" title="Upravit">
+                                        <span class="icon-pencil">✏️</span>
+                                    </button>
+                                </td>
                             </tr>
                         `;
                     }).join('')}
@@ -181,6 +188,196 @@ async function loadStockHistory(stockName, contentId) {
         console.error('Error loading stock history:', error);
         document.getElementById(contentId).innerHTML = '<p style="color: red;">Chyba při načítání historie.</p>';
     }
+};
+
+// Edit transaction function (global)
+window.editTransaction = async function(transactionId, stockName, contentId) {
+    try {
+        // Get transaction data
+        const response = await fetch(`/api/transactions?stock=${encodeURIComponent(stockName)}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load transaction');
+        }
+        
+        const transaction = data.transactions.find(tx => tx.id === transactionId);
+        if (!transaction) {
+            showMessage('Transakce nenalezena', 'error');
+            return;
+        }
+        
+        const row = document.querySelector(`tr[data-tx-id="${transactionId}"]`);
+        if (!row) return;
+        
+        // Check if already in edit mode
+        if (row.classList.contains('edit-mode')) {
+            return;
+        }
+        
+        // Store original values
+        row.dataset.originalDate = transaction.date;
+        row.dataset.originalPrice = transaction.price;
+        row.dataset.originalQuantity = transaction.quantity;
+        row.dataset.originalFees = transaction.fees || 0;
+        
+        // Convert to edit mode
+        row.classList.add('edit-mode');
+        
+        // Parse date from YYYY-MM-DD to DD.MM.YYYY for display
+        const dateParts = transaction.date.split('-');
+        const displayDate = `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`;
+        
+        row.innerHTML = `
+            <td>
+                <input type="text" class="edit-date" value="${displayDate}" placeholder="DD.MM.YYYY" style="width: 100px;">
+            </td>
+            <td><span class="${transaction.type === 'buy' ? 'profit' : 'loss'}">${transaction.type === 'buy' ? 'Nákup' : 'Prodej'}</span></td>
+            <td>
+                <input type="number" class="edit-price" value="${transaction.price}" step="0.01" min="0" style="width: 100px;">
+            </td>
+            <td>
+                <input type="number" class="edit-quantity" value="${transaction.quantity}" min="1" style="width: 80px;">
+            </td>
+            <td>
+                <input type="number" class="edit-fees" value="${transaction.fees || 0}" step="0.01" min="0" style="width: 100px;">
+            </td>
+            <td class="tx-total">-</td>
+            <td>
+                <button class="btn-save" onclick="saveTransaction(${transactionId}, '${stockName}', '${contentId}')" title="Uložit">✓</button>
+                <button class="btn-cancel" onclick="cancelEditTransaction(${transactionId}, '${stockName}', '${contentId}')" title="Zrušit">✕</button>
+            </td>
+        `;
+        
+        // Initialize date picker for edit mode
+        const dateInput = row.querySelector('.edit-date');
+        if (dateInput) {
+            flatpickr(dateInput, {
+                locale: 'cs',
+                dateFormat: 'd.m.Y',
+                altInput: false,
+                altFormat: 'd.m.Y',
+                firstDayOfWeek: 1,
+                defaultDate: transaction.date,
+                allowInput: true,
+                parseDate: (datestr, format) => {
+                    const parts = datestr.split('.');
+                    if (parts.length === 3) {
+                        const day = parseInt(parts[0], 10);
+                        const month = parseInt(parts[1], 10) - 1;
+                        const year = parseInt(parts[2], 10);
+                        return new Date(year, month, day);
+                    }
+                    return null;
+                },
+                formatDate: (date, format) => {
+                    const day = String(date.getDate()).padStart(2, '0');
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const year = date.getFullYear();
+                    return `${day}.${month}.${year}`;
+                },
+                onChange: function(selectedDates, dateStr, instance) {
+                    if (selectedDates.length > 0) {
+                        const date = selectedDates[0];
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        dateInput.setAttribute('data-iso-date', `${year}-${month}-${day}`);
+                    }
+                }
+            });
+        }
+        
+        // Add change listeners to update total value
+        const updateTotal = () => {
+            const price = parseFloat(row.querySelector('.edit-price').value) || 0;
+            const quantity = parseInt(row.querySelector('.edit-quantity').value) || 0;
+            const fees = parseFloat(row.querySelector('.edit-fees').value) || 0;
+            const total = transaction.type === 'buy' 
+                ? (price * quantity) + fees
+                : (price * quantity) - fees;
+            row.querySelector('.tx-total').textContent = formatCurrency(total);
+        };
+        
+        row.querySelector('.edit-price').addEventListener('input', updateTotal);
+        row.querySelector('.edit-quantity').addEventListener('input', updateTotal);
+        row.querySelector('.edit-fees').addEventListener('input', updateTotal);
+        updateTotal();
+        
+    } catch (error) {
+        console.error('Error editing transaction:', error);
+        showMessage('Chyba při úpravě transakce: ' + error.message, 'error');
+    }
+};
+
+// Save transaction function (global)
+window.saveTransaction = async function(transactionId, stockName, contentId) {
+    try {
+        const row = document.querySelector(`tr[data-tx-id="${transactionId}"]`);
+        if (!row) return;
+        
+        // Get values from inputs
+        const dateInput = row.querySelector('.edit-date');
+        let dateValue = dateInput.getAttribute('data-iso-date');
+        if (!dateValue) {
+            // Parse DD.MM.YYYY format
+            const dateStr = dateInput.value;
+            const parts = dateStr.split('.');
+            if (parts.length === 3) {
+                dateValue = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            } else {
+                throw new Error('Neplatný formát data');
+            }
+        }
+        
+        const price = parseFloat(row.querySelector('.edit-price').value);
+        const quantity = parseInt(row.querySelector('.edit-quantity').value);
+        const fees = parseFloat(row.querySelector('.edit-fees').value) || 0;
+        
+        // Validate
+        if (!dateValue || price <= 0 || quantity <= 0 || fees < 0) {
+            showMessage('Neplatné hodnoty', 'error');
+            return;
+        }
+        
+        // Update transaction
+        const response = await fetch(`/api/transaction/${transactionId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                date: dateValue,
+                price: price,
+                quantity: quantity,
+                fees: fees
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update transaction');
+        }
+        
+        showMessage('Transakce byla úspěšně aktualizována', 'success');
+        
+        // Reload transaction history
+        await loadStockHistory(stockName, contentId);
+        
+        // Reload holdings and tax info
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
+        
+    } catch (error) {
+        console.error('Error saving transaction:', error);
+        showMessage('Chyba při ukládání transakce: ' + error.message, 'error');
+    }
+};
+
+// Cancel edit function (global)
+window.cancelEditTransaction = async function(transactionId, stockName, contentId) {
+    // Reload transaction history to restore original view
+    await loadStockHistory(stockName, contentId);
 };
 
 // Display profit/loss table

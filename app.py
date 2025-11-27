@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
-from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices
+from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices, get_transaction, update_transaction
 from tax_calculator import (
     calculate_holdings,
     get_three_year_holdings,
@@ -182,6 +182,49 @@ def get_transactions_api():
             transactions = [tx for tx in transactions if tx['stock_name'] == stock_name]
         
         return jsonify({'transactions': transactions}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/transaction/<int:transaction_id>', methods=['PUT'])
+def update_transaction_api(transaction_id):
+    """Update an existing transaction"""
+    try:
+        # Check if transaction exists
+        transaction = get_transaction(transaction_id)
+        if not transaction:
+            return jsonify({'error': 'Transaction not found'}), 404
+        
+        data = request.get_json()
+        
+        date = data.get('date')
+        price = float(data.get('price'))
+        quantity = int(data.get('quantity'))
+        fees = float(data.get('fees', 0.0)) or 0.0
+        
+        # Validate
+        if not date or price <= 0 or quantity <= 0:
+            return jsonify({'error': 'Invalid input data'}), 400
+        
+        if fees < 0:
+            return jsonify({'error': 'Fees cannot be negative'}), 400
+        
+        # Validate date format
+        try:
+            datetime.strptime(date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        
+        # Update transaction
+        success = update_transaction(transaction_id, date, price, quantity, fees)
+        
+        if not success:
+            return jsonify({'error': 'Failed to update transaction'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': 'Transaction updated successfully'
+        }), 200
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
