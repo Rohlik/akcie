@@ -54,7 +54,7 @@
         <h2>Daňové informace</h2>
         <div id="tax-info-content">
             <div class="info-item">
-                <span class="label">Prodeje v tomto roce:</span>
+                <span class="label">Prodeje v tomto roce (bez akcií držených >3 roky):</span>
                 <span class="value" id="current-year-sales">-</span>
             </div>
             <div class="info-item">
@@ -64,6 +64,9 @@
             <div class="info-item">
                 <span class="label">Hodnota akcií držených >3 roky:</span>
                 <span class="value highlight-green" id="three-year-value">-</span>
+            </div>
+            <div class="info-item" style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+                <span>Poznámka: Prodeje akcií držených déle než 3 roky jsou vždy daňově osvobozené a nepočítají se do limitu 100 000 Kč.</span>
             </div>
         </div>
     </section>

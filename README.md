@@ -190,8 +190,9 @@ akcie/
 
 Aplikace implementuje následující pravidla:
 
-- **3leté osvobození**: Akcie koupené před více než 3 lety jsou vždy daňově osvobozené
+- **3leté osvobození**: Akcie koupené před více než 3 lety jsou vždy daňově osvobozené (bez ohledu na částku)
 - **100k Kč osvobození**: Celkové prodeje v daňovém roce ≤ 100 000 Kč jsou daňově osvobozené
+- **Nezávislá osvobození**: Tyto dvě osvobození jsou nezávislá - prodeje akcií držených >3 roky se NEpočítají do limitu 100 000 Kč
 - **FIFO metoda**: Nejstarší nákupy jsou považovány za prodané jako první
 - **Daňový rok**: 1. leden až 31. prosinec
 

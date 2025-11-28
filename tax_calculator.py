@@ -94,6 +94,7 @@ def get_three_year_holdings(holdings, current_date=None):
 def calculate_current_year_sales(transactions, current_year=None):
     """
     Sum sell transaction values in the current tax year (net of fees).
+    EXCLUDES sales of stocks held >3 years (they are tax-free regardless of amount).
     Tax year is January 1 to December 31.
     For sell transactions: revenue = (price * quantity) - fees
     """
@@ -102,15 +103,73 @@ def calculate_current_year_sales(transactions, current_year=None):
     
     year_start = datetime(current_year, 1, 1).date()
     year_end = datetime(current_year, 12, 31).date()
+    three_year_date = datetime.now().date() - timedelta(days=Config.THREE_YEAR_EXEMPTION_DAYS)
+    
+    # Calculate holdings before each sale to determine if stock was held >3 years
+    # Process transactions chronologically to track holdings
+    holdings = {}  # stock_name -> list of (date, quantity) sorted by date
     
     total_sales = 0
-    for tx in transactions:
-        if tx['type'] == 'sell':
-            tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
+    
+    # Sort transactions by date
+    sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
+    
+    for tx in sorted_transactions:
+        stock_name = tx['stock_name']
+        tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
+        
+        if tx['type'] == 'buy':
+            # Add purchase to holdings
+            if stock_name not in holdings:
+                holdings[stock_name] = []
+            holdings[stock_name].append({
+                'date': tx_date,
+                'quantity': tx['quantity']
+            })
+            # Sort by date (FIFO)
+            holdings[stock_name].sort(key=lambda x: x['date'])
+            
+        elif tx['type'] == 'sell':
+            # Apply FIFO to determine which purchases were sold
+            remaining_to_sell = tx['quantity']
+            stock_holdings = holdings.get(stock_name, [])
+            
+            # Track if any of the sold shares were held <3 years
+            has_less_than_3_years = False
+            
+            i = 0
+            while remaining_to_sell > 0 and i < len(stock_holdings):
+                holding = stock_holdings[i]
+                purchase_date = holding['date']
+                
+                # Only consider holdings purchased before or on sale date
+                if purchase_date <= tx_date:
+                    # Check if this purchase was held <3 years at time of sale
+                    days_held = (tx_date - purchase_date).days
+                    if days_held <= Config.THREE_YEAR_EXEMPTION_DAYS:
+                        has_less_than_3_years = True
+                    
+                    if holding['quantity'] <= remaining_to_sell:
+                        remaining_to_sell -= holding['quantity']
+                        stock_holdings.pop(i)
+                    else:
+                        holding['quantity'] -= remaining_to_sell
+                        remaining_to_sell = 0
+                i += 1
+            
+            # Update holdings dictionary
+            holdings[stock_name] = stock_holdings
+            
+            # Check if this sale is in current tax year
             if year_start <= tx_date <= year_end:
-                tx_fees = tx.get('fees', 0.0) or 0.0
-                # Net sale value = (price * quantity) - fees
-                total_sales += (tx['price'] * tx['quantity']) - tx_fees
+                # Only count sales if they include stocks held <3 years
+                # If all sold stocks were held >3 years, don't count against 100k limit
+                if has_less_than_3_years:
+                    tx_fees = tx.get('fees', 0.0) or 0.0
+                    # Net sale value = (price * quantity) - fees
+                    total_sales += (tx['price'] * tx['quantity']) - tx_fees
+                # Note: If has_less_than_3_years is False, the entire sale was of stocks held >3 years
+                # and should not count against the 100k limit
     
     return total_sales
 
