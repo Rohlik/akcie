@@ -20,8 +20,6 @@ Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou o
 ## Požadavky
 
 - **Python 3.8 nebo novější** (doporučeno Python 3.9+)
-- Flask 3.1.2
-- yfinance 0.2.66
 
 ## Instalace
 

@@ -12,7 +12,7 @@ from tax_calculator import (
 )
 from yahoo_finance import update_all_prices, get_cached_price
 from config import Config
-from utils import sanitize_input, validate_transaction_data, create_error_response
+from utils import sanitize_input, sanitize_stock_name, validate_transaction_data, create_error_response, create_success_response
 
 # Configure logging
 logging.basicConfig(
