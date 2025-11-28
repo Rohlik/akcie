@@ -1,6 +1,9 @@
 import yfinance as yf
 from datetime import datetime
+import logging
 from models import update_stock_price, get_stock_price
+
+logger = logging.getLogger(__name__)
 
 def fetch_stock_price(stock_name):
     """
@@ -53,7 +56,7 @@ def fetch_stock_price(stock_name):
     except Exception as e:
         # Mark as error in cache
         update_stock_price(stock_name, None, 'error')
-        print(f"Error fetching price for {stock_name}: {e}")
+        logger.warning(f"Error fetching price for {stock_name}: {e}")
         return None
 
 def update_all_prices(stock_names):

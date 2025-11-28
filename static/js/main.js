@@ -1,3 +1,58 @@
+// CSRF token management
+let csrfToken = null;
+
+async function getCsrfToken() {
+    if (!csrfToken) {
+        try {
+            const response = await fetch('/api/csrf-token');
+            const data = await response.json();
+            csrfToken = data.csrf_token;
+        } catch (error) {
+            console.error('Failed to get CSRF token:', error);
+        }
+    }
+    return csrfToken;
+}
+
+// Loading state management
+const loadingStates = new Set();
+
+function setLoading(elementId, isLoading) {
+    if (isLoading) {
+        loadingStates.add(elementId);
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.classList.add('loading');
+            element.disabled = true;
+        }
+    } else {
+        loadingStates.delete(elementId);
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.classList.remove('loading');
+            element.disabled = false;
+        }
+    }
+}
+
+function showLoadingOverlay(show = true) {
+    let overlay = document.getElementById('loading-overlay');
+    if (show) {
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'loading-overlay';
+            overlay.className = 'loading-overlay';
+            overlay.innerHTML = '<div class="spinner"></div><p>Načítání...</p>';
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+    } else {
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+    }
+}
+
 // Format number as CZK currency
 function formatCurrency(value) {
     if (value === null || value === undefined) return '-';
@@ -35,21 +90,35 @@ function showMessage(message, type = 'success') {
     }, 5000);
 }
 
+// Error handler - wraps console.error for production
+function handleError(error, userMessage) {
+    // In production, you might want to send errors to a logging service
+    if (process?.env?.NODE_ENV !== 'production') {
+        console.error(error);
+    }
+    showMessage(userMessage || 'Došlo k chybě', 'error');
+}
+
 // Load and display holdings
 async function loadHoldings() {
+    setLoading('holdings-tbody', true);
     try {
         const response = await fetch('/api/holdings');
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to load holdings');
+            const errorMsg = data.error?.message || data.error || 'Failed to load holdings';
+            throw new Error(errorMsg);
         }
         
         displayHoldings(data.holdings);
         displayProfitLoss(data.holdings);
     } catch (error) {
-        console.error('Error loading holdings:', error);
-        showMessage('Chyba při načítání portfolia: ' + error.message, 'error');
+        handleError(error, 'Chyba při načítání portfolia: ' + error.message);
+        document.getElementById('holdings-tbody').innerHTML = 
+            '<tr><td colspan="7" class="loading">Chyba při načítání dat</td></tr>';
+    } finally {
+        setLoading('holdings-tbody', false);
     }
 }
 
@@ -163,9 +232,16 @@ async function loadStockHistory(stockName, contentId) {
                             ? (tx.price * tx.quantity) + fees  // Buy: price + fees
                             : (tx.price * tx.quantity) - fees; // Sell: price - fees
                         const rowId = `tx-row-${tx.id}`;
+                        
+                        // Format date from YYYY-MM-DD to DD.MM.YYYY
+                        const dateParts = tx.date.split('-');
+                        const formattedDate = dateParts.length === 3 
+                            ? `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`
+                            : tx.date;
+                        
                         return `
                             <tr id="${rowId}" data-tx-id="${tx.id}" data-tx-stock="${stockName}" data-tx-type="${tx.type}">
-                                <td class="tx-date">${tx.date}</td>
+                                <td class="tx-date">${formattedDate}</td>
                                 <td><span class="${typeClass}">${typeText}</span></td>
                                 <td class="tx-price">${formatCurrency(tx.price)}</td>
                                 <td class="tx-quantity">${formatNumber(tx.quantity)}</td>
@@ -174,6 +250,9 @@ async function loadStockHistory(stockName, contentId) {
                                 <td>
                                     <button class="btn-edit" onclick="editTransaction(${tx.id}, '${stockName}', '${contentId}')" title="Upravit">
                                         <span class="icon-pencil">✏️</span>
+                                    </button>
+                                    <button class="btn-delete" onclick="deleteTransaction(${tx.id}, '${stockName}', '${contentId}')" title="Smazat">
+                                        🗑️
                                     </button>
                                 </td>
                             </tr>
@@ -198,7 +277,8 @@ window.editTransaction = async function(transactionId, stockName, contentId) {
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to load transaction');
+            const errorMsg = data.error?.message || data.error || 'Failed to load transaction';
+            throw new Error(errorMsg);
         }
         
         const transaction = data.transactions.find(tx => tx.id === transactionId);
@@ -341,11 +421,17 @@ window.saveTransaction = async function(transactionId, stockName, contentId) {
         }
         
         // Update transaction
+        const token = await getCsrfToken();
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['X-CSRFToken'] = token;
+        }
+        
         const response = await fetch(`/api/transaction/${transactionId}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify({
                 date: dateValue,
                 price: price,
@@ -357,7 +443,8 @@ window.saveTransaction = async function(transactionId, stockName, contentId) {
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to update transaction');
+            const errorMsg = data.error?.message || data.error || 'Failed to update transaction';
+            throw new Error(errorMsg);
         }
         
         showMessage('Transakce byla úspěšně aktualizována', 'success');
@@ -369,8 +456,45 @@ window.saveTransaction = async function(transactionId, stockName, contentId) {
         await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
         
     } catch (error) {
-        console.error('Error saving transaction:', error);
-        showMessage('Chyba při ukládání transakce: ' + error.message, 'error');
+        handleError(error, 'Chyba při ukládání transakce: ' + error.message);
+    }
+};
+
+// Delete transaction function (global)
+window.deleteTransaction = async function(transactionId, stockName, contentId) {
+    if (!confirm('Opravdu chcete smazat tuto transakci? Tato akce je nevratná.')) {
+        return;
+    }
+    
+    try {
+        const token = await getCsrfToken();
+        const headers = {};
+        if (token) {
+            headers['X-CSRFToken'] = token;
+        }
+        
+        const response = await fetch(`/api/transaction/${transactionId}`, {
+            method: 'DELETE',
+            headers: headers
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            const errorMsg = data.error?.message || data.error || 'Failed to delete transaction';
+            throw new Error(errorMsg);
+        }
+        
+        showMessage('Transakce byla úspěšně smazána', 'success');
+        
+        // Reload transaction history
+        await loadStockHistory(stockName, contentId);
+        
+        // Reload holdings and tax info
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
+        
+    } catch (error) {
+        handleError(error, 'Chyba při mazání transakce: ' + error.message);
     }
 };
 
@@ -427,15 +551,15 @@ async function loadTaxInfo() {
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to load tax info');
+            const errorMsg = data.error?.message || data.error || 'Failed to load tax info';
+            throw new Error(errorMsg);
         }
         
         document.getElementById('current-year-sales').textContent = formatCurrency(data.current_year_sales);
         document.getElementById('remaining-capacity').textContent = formatCurrency(data.remaining_tax_free_capacity);
         document.getElementById('three-year-value').textContent = formatCurrency(data.three_year_total_value);
     } catch (error) {
-        console.error('Error loading tax info:', error);
-        showMessage('Chyba při načítání daňových informací: ' + error.message, 'error');
+        handleError(error, 'Chyba při načítání daňových informací: ' + error.message);
     }
 }
 
@@ -459,6 +583,69 @@ function updateStockNameField() {
     }
 }
 
+// Form validation
+function validateTransactionForm() {
+    const type = document.getElementById('type').value;
+    const stockNameInput = type === 'sell' 
+        ? document.getElementById('stock_name_select')
+        : document.getElementById('stock_name');
+    const priceInput = document.getElementById('price');
+    const quantityInput = document.getElementById('quantity');
+    const dateInput = document.getElementById('date');
+    const feesInput = document.getElementById('fees');
+    
+    // Clear previous errors
+    document.querySelectorAll('.field-error').forEach(el => el.remove());
+    
+    let isValid = true;
+    
+    // Validate stock name
+    if (!stockNameInput.value.trim()) {
+        showFieldError(stockNameInput, 'Název akcie je povinný');
+        isValid = false;
+    }
+    
+    // Validate date
+    if (!dateInput.value) {
+        showFieldError(dateInput, 'Datum je povinné');
+        isValid = false;
+    }
+    
+    // Validate price
+    const price = parseFloat(priceInput.value);
+    if (!price || price <= 0) {
+        showFieldError(priceInput, 'Cena musí být větší než 0');
+        isValid = false;
+    }
+    
+    // Validate quantity
+    const quantity = parseInt(quantityInput.value);
+    if (!quantity || quantity <= 0) {
+        showFieldError(quantityInput, 'Množství musí být větší než 0');
+        isValid = false;
+    }
+    
+    // Validate fees
+    const fees = parseFloat(feesInput.value) || 0;
+    if (fees < 0) {
+        showFieldError(feesInput, 'Poplatky nemohou být záporné');
+        isValid = false;
+    }
+    
+    return isValid;
+}
+
+function showFieldError(input, message) {
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'field-error';
+    errorDiv.style.color = 'var(--danger-color)';
+    errorDiv.style.fontSize = '0.875rem';
+    errorDiv.style.marginTop = '0.25rem';
+    errorDiv.textContent = message;
+    input.parentNode.appendChild(errorDiv);
+    input.style.borderColor = 'var(--danger-color)';
+}
+
 // Load available stocks for sell dropdown
 async function loadAvailableStocks() {
     try {
@@ -466,7 +653,8 @@ async function loadAvailableStocks() {
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to load holdings');
+            const errorMsg = data.error?.message || data.error || 'Failed to load holdings';
+            throw new Error(errorMsg);
         }
         
         const selectInput = document.getElementById('stock_name_select');
@@ -477,7 +665,7 @@ async function loadAvailableStocks() {
                 `<option value="${h.stock_name}">${h.stock_name} (${formatNumber(h.quantity)} ks)</option>`
             ).join('');
     } catch (error) {
-        console.error('Error loading available stocks:', error);
+        handleError(error, 'Chyba při načítání dostupných akcií');
     }
 }
 
@@ -516,19 +704,34 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         fees: fees
     };
     
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    setLoading(submitBtn.id || 'submit-btn', true);
+    
     try {
+        // Validate form
+        if (!validateTransactionForm()) {
+            return;
+        }
+        
+        const token = await getCsrfToken();
+        const headers = {
+            'Content-Type': 'application/json'
+        };
+        if (token) {
+            headers['X-CSRFToken'] = token;
+        }
+        
         const response = await fetch('/api/transaction', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: headers,
             body: JSON.stringify(formData)
         });
         
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to add transaction');
+            const errorMsg = data.error?.message || data.error || 'Failed to add transaction';
+            throw new Error(errorMsg);
         }
         
         showMessage('Transakce byla úspěšně přidána', 'success');
@@ -546,8 +749,9 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
         await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
         
     } catch (error) {
-        console.error('Error adding transaction:', error);
-        showMessage('Chyba při přidávání transakce: ' + error.message, 'error');
+        handleError(error, 'Chyba při přidávání transakce: ' + error.message);
+    } finally {
+        setLoading(submitBtn.id || 'submit-btn', false);
     }
 });
 
@@ -560,14 +764,22 @@ document.getElementById('update-prices-btn').addEventListener('click', async () 
     btn.textContent = 'Aktualizuji...';
     
     try {
+        const token = await getCsrfToken();
+        const headers = {};
+        if (token) {
+            headers['X-CSRFToken'] = token;
+        }
+        
         const response = await fetch('/api/update-prices', {
-            method: 'POST'
+            method: 'POST',
+            headers: headers
         });
         
         const data = await response.json();
         
         if (!response.ok) {
-            throw new Error(data.error || 'Failed to update prices');
+            const errorMsg = data.error?.message || data.error || 'Failed to update prices';
+            throw new Error(errorMsg);
         }
         
         showMessage(`Ceny aktualizovány: ${data.updated} úspěšně, ${data.failed} selhalo`, 'success');
@@ -577,8 +789,7 @@ document.getElementById('update-prices-btn').addEventListener('click', async () 
         await loadTaxInfo();
         
     } catch (error) {
-        console.error('Error updating prices:', error);
-        showMessage('Chyba při aktualizaci cen: ' + error.message, 'error');
+        handleError(error, 'Chyba při aktualizaci cen: ' + error.message);
     } finally {
         btn.disabled = false;
         btn.textContent = originalText;
@@ -597,7 +808,7 @@ async function loadYearlyProfitLoss() {
         
         displayYearlyProfitLoss(data.yearly_data);
     } catch (error) {
-        console.error('Error loading yearly profit/loss:', error);
+        handleError(error, 'Chyba při načítání ročních zisků/ztrát');
         document.getElementById('yearly-profit-loss-tbody').innerHTML = 
             '<tr><td colspan="5" class="loading">Chyba při načítání dat</td></tr>';
     }

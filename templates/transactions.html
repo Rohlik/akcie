@@ -69,9 +69,15 @@ function displayTransactions(transactions) {
             ? (tx.price * tx.quantity) + fees  // Buy: price + fees
             : (tx.price * tx.quantity) - fees; // Sell: price - fees
         
+        // Format date from YYYY-MM-DD to DD.MM.YYYY
+        const dateParts = tx.date.split('-');
+        const formattedDate = dateParts.length === 3 
+            ? `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`
+            : tx.date;
+        
         return `
             <tr>
-                <td>${tx.date}</td>
+                <td>${formattedDate}</td>
                 <td><span class="${typeClass}">${typeText}</span></td>
                 <td><strong>${tx.stock_name}</strong></td>
                 <td>${formatCurrency(tx.price)}</td>

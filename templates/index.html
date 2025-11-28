@@ -45,13 +45,19 @@
                 <small style="color: var(--text-light); font-size: 0.875rem;">Poplatky burze a další související náklady</small>
             </div>
             
-            <button type="submit" class="btn btn-primary">Přidat transakci</button>
+            <button type="submit" id="submit-btn" class="btn btn-primary">Přidat transakci</button>
         </form>
     </section>
     
     <!-- Tax Information Card -->
     <section class="card tax-info">
-        <h2>Daňové informace</h2>
+        <div class="card-header">
+            <h2>Daňové informace</h2>
+            <div>
+                <a href="/api/export/tax-report" class="btn btn-secondary" style="margin-right: 0.5rem;">Exportovat daňovou zprávu (CSV)</a>
+                <a href="/api/export/transactions" class="btn btn-secondary">Exportovat transakce (CSV)</a>
+            </div>
+        </div>
         <div id="tax-info-content">
             <div class="info-item">
                 <span class="label">Prodeje v tomto roce (bez akcií držených >3 roky):</span>

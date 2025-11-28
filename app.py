@@ -1,6 +1,8 @@
 from flask import Flask, render_template, request, jsonify
+from flask_wtf.csrf import CSRFProtect, generate_csrf
 from datetime import datetime, timedelta
-from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices, get_transaction, update_transaction
+import logging
+from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices, get_transaction, update_transaction, delete_transaction
 from tax_calculator import (
     calculate_holdings,
     get_three_year_holdings,
@@ -10,13 +12,36 @@ from tax_calculator import (
 )
 from yahoo_finance import update_all_prices, get_cached_price
 from config import Config
+from utils import sanitize_input, validate_transaction_data, create_error_response
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, Config.LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(Config.LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
+# Initialize CSRF protection
+csrf = CSRFProtect(app)
+
+# Validate secret key on startup
+Config.validate_secret_key()
+
 # Initialize database on startup
 with app.app_context():
     init_db()
+
+@app.route('/api/csrf-token', methods=['GET'])
+def get_csrf_token():
+    """Get CSRF token for frontend"""
+    return jsonify({'csrf_token': generate_csrf()})
 
 @app.route('/')
 def index():
@@ -24,44 +49,38 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/transaction', methods=['POST'])
+@csrf.exempt  # CSRF handled via token in request header
 def add_transaction_api():
     """Add a new buy/sell transaction"""
     try:
         data = request.get_json()
+        if not data:
+            return create_error_response('No data provided', 'NO_DATA', 400)
         
-        transaction_type = data.get('type')
-        stock_name = data.get('stock_name')
-        date = data.get('date')
-        price = float(data.get('price'))
-        quantity = int(data.get('quantity'))
-        fees = float(data.get('fees', 0.0)) or 0.0  # Default to 0 if not provided
+        # Validate and sanitize input
+        is_valid, error_msg, sanitized_data = validate_transaction_data(data)
+        if not is_valid:
+            return create_error_response(error_msg, 'VALIDATION_ERROR', 400)
         
-        # Validate
-        if transaction_type not in ['buy', 'sell']:
-            return jsonify({'error': 'Invalid transaction type'}), 400
+        transaction_id = add_transaction(
+            sanitized_data['type'],
+            sanitized_data['stock_name'],
+            sanitized_data['date'],
+            sanitized_data['price'],
+            sanitized_data['quantity'],
+            sanitized_data['fees']
+        )
         
-        if not stock_name or not date or price <= 0 or quantity <= 0:
-            return jsonify({'error': 'Invalid input data'}), 400
-        
-        if fees < 0:
-            return jsonify({'error': 'Fees cannot be negative'}), 400
-        
-        # Validate date format
-        try:
-            datetime.strptime(date, '%Y-%m-%d')
-        except ValueError:
-            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
-        
-        transaction_id = add_transaction(transaction_type, stock_name, date, price, quantity, fees)
-        
-        return jsonify({
-            'success': True,
-            'transaction_id': transaction_id,
-            'message': 'Transaction added successfully'
-        }), 201
+        logger.info(f"Transaction added: ID={transaction_id}, Stock={sanitized_data['stock_name']}, Type={sanitized_data['type']}")
+        return create_success_response(
+            {'transaction_id': transaction_id},
+            'Transaction added successfully',
+            201
+        )
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error adding transaction: {e}", exc_info=True)
+        return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
 
 @app.route('/api/holdings', methods=['GET'])
 def get_holdings_api():
@@ -101,7 +120,8 @@ def get_holdings_api():
         return jsonify({'holdings': holdings_list}), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting holdings: {e}", exc_info=True)
+        return create_error_response('Failed to load holdings', 'LOAD_ERROR', 500)
 
 @app.route('/api/tax-info', methods=['GET'])
 def get_tax_info_api():
@@ -140,9 +160,11 @@ def get_tax_info_api():
         }), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting tax info: {e}", exc_info=True)
+        return create_error_response('Failed to load tax information', 'LOAD_ERROR', 500)
 
 @app.route('/api/update-prices', methods=['POST'])
+@csrf.exempt
 def update_prices_api():
     """Fetch current prices from Yahoo Finance"""
     try:
@@ -153,29 +175,34 @@ def update_prices_api():
         stock_names = list(set(h['stock_name'] for h in holdings))
         
         if not stock_names:
-            return jsonify({'message': 'No stocks to update'}), 200
+            return create_success_response({'message': 'No stocks to update'})
         
-        # Update prices
+        logger.info(f"Updating prices for {len(stock_names)} stocks")
+        # Update prices (async handling will be added later)
         results = update_all_prices(stock_names)
         
         updated = sum(1 for price in results.values() if price is not None)
         failed = len(stock_names) - updated
         
-        return jsonify({
-            'success': True,
+        logger.info(f"Price update completed: {updated} updated, {failed} failed")
+        return create_success_response({
             'updated': updated,
             'failed': failed,
             'results': results
-        }), 200
+        })
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error updating prices: {e}", exc_info=True)
+        return create_error_response('Failed to update prices', 'UPDATE_ERROR', 500)
 
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions_api():
     """List all transactions, optionally filtered by stock"""
     try:
         stock_name = request.args.get('stock')
+        if stock_name:
+            stock_name = sanitize_stock_name(stock_name)
+        
         transactions = get_all_transactions()
         
         if stock_name:
@@ -183,50 +210,79 @@ def get_transactions_api():
         
         return jsonify({'transactions': transactions}), 200
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting transactions: {e}", exc_info=True)
+        return create_error_response('Failed to load transactions', 'LOAD_ERROR', 500)
 
 @app.route('/api/transaction/<int:transaction_id>', methods=['PUT'])
+@csrf.exempt
 def update_transaction_api(transaction_id):
     """Update an existing transaction"""
     try:
         # Check if transaction exists
         transaction = get_transaction(transaction_id)
         if not transaction:
-            return jsonify({'error': 'Transaction not found'}), 404
+            return create_error_response('Transaction not found', 'NOT_FOUND', 404)
         
         data = request.get_json()
+        if not data:
+            return create_error_response('No data provided', 'NO_DATA', 400)
         
-        date = data.get('date')
-        price = float(data.get('price'))
-        quantity = int(data.get('quantity'))
-        fees = float(data.get('fees', 0.0)) or 0.0
+        # Merge with existing transaction type and stock_name for validation
+        validation_data = {
+            'type': transaction['type'],
+            'stock_name': transaction['stock_name'],
+            'date': data.get('date', transaction['date']),
+            'price': data.get('price', transaction['price']),
+            'quantity': data.get('quantity', transaction['quantity']),
+            'fees': data.get('fees', transaction.get('fees', 0.0))
+        }
         
-        # Validate
-        if not date or price <= 0 or quantity <= 0:
-            return jsonify({'error': 'Invalid input data'}), 400
-        
-        if fees < 0:
-            return jsonify({'error': 'Fees cannot be negative'}), 400
-        
-        # Validate date format
-        try:
-            datetime.strptime(date, '%Y-%m-%d')
-        except ValueError:
-            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+        # Validate and sanitize input
+        is_valid, error_msg, sanitized_data = validate_transaction_data(validation_data)
+        if not is_valid:
+            return create_error_response(error_msg, 'VALIDATION_ERROR', 400)
         
         # Update transaction
-        success = update_transaction(transaction_id, date, price, quantity, fees)
+        success = update_transaction(
+            transaction_id,
+            sanitized_data['date'],
+            sanitized_data['price'],
+            sanitized_data['quantity'],
+            sanitized_data['fees']
+        )
         
         if not success:
-            return jsonify({'error': 'Failed to update transaction'}), 500
+            return create_error_response('Failed to update transaction', 'UPDATE_FAILED', 500)
         
-        return jsonify({
-            'success': True,
-            'message': 'Transaction updated successfully'
-        }), 200
+        logger.info(f"Transaction updated: ID={transaction_id}")
+        return create_success_response(message='Transaction updated successfully')
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error updating transaction {transaction_id}: {e}", exc_info=True)
+        return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
+
+@app.route('/api/transaction/<int:transaction_id>', methods=['DELETE'])
+@csrf.exempt
+def delete_transaction_api(transaction_id):
+    """Delete a transaction"""
+    try:
+        # Check if transaction exists
+        transaction = get_transaction(transaction_id)
+        if not transaction:
+            return create_error_response('Transaction not found', 'NOT_FOUND', 404)
+        
+        # Delete transaction
+        success = delete_transaction(transaction_id)
+        
+        if not success:
+            return create_error_response('Failed to delete transaction', 'DELETE_FAILED', 500)
+        
+        logger.info(f"Transaction deleted: ID={transaction_id}")
+        return create_success_response(message='Transaction deleted successfully')
+        
+    except Exception as e:
+        logger.error(f"Error deleting transaction {transaction_id}: {e}", exc_info=True)
+        return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
 
 @app.route('/api/yearly-profit-loss', methods=['GET'])
 def get_yearly_profit_loss_api():
@@ -309,7 +365,93 @@ def get_yearly_profit_loss_api():
         return jsonify({'yearly_data': yearly_data}), 200
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error calculating yearly profit/loss: {e}", exc_info=True)
+        return create_error_response('Failed to calculate yearly profit/loss', 'CALCULATION_ERROR', 500)
+
+@app.route('/api/export/transactions', methods=['GET'])
+def export_transactions_csv():
+    """Export all transactions as CSV"""
+    try:
+        import csv
+        from io import StringIO
+        from flask import Response
+        
+        transactions = get_all_transactions()
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['ID', 'Typ', 'Akcie', 'Datum', 'Cena (CZK)', 'Množství', 'Poplatky (CZK)', 'Vytvořeno'])
+        
+        # Write data
+        for tx in transactions:
+            writer.writerow([
+                tx['id'],
+                'Nákup' if tx['type'] == 'buy' else 'Prodej',
+                tx['stock_name'],
+                tx['date'],
+                tx['price'],
+                tx['quantity'],
+                tx.get('fees', 0.0) or 0.0,
+                tx.get('created_at', '')
+            ])
+        
+        output.seek(0)
+        
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=transakce.csv'}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting transactions: {e}", exc_info=True)
+        return create_error_response('Failed to export transactions', 'EXPORT_ERROR', 500)
+
+@app.route('/api/export/tax-report', methods=['GET'])
+def export_tax_report_csv():
+    """Export tax report as CSV"""
+    try:
+        import csv
+        from io import StringIO
+        from flask import Response
+        
+        transactions = get_all_transactions()
+        holdings = calculate_holdings(transactions)
+        
+        current_year = datetime.now().year
+        current_year_sales = calculate_current_year_sales(transactions, current_year)
+        remaining_capacity = calculate_tax_free_capacity(current_year_sales)
+        
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow(['Daňová zpráva'])
+        writer.writerow(['Rok', str(current_year)])
+        writer.writerow([])
+        writer.writerow(['Prodeje v tomto roce (bez akcií držených >3 roky)', f'{current_year_sales:,.2f} CZK'])
+        writer.writerow(['Zbývající daňově osvobozená kapacita', f'{remaining_capacity:,.2f} CZK'])
+        writer.writerow(['Limit', f'{Config.TAX_FREE_LIMIT:,.2f} CZK'])
+        writer.writerow([])
+        writer.writerow(['Akcie držené déle než 3 roky'])
+        
+        three_year = get_three_year_holdings(holdings)
+        for stock_name, data in three_year.items():
+            writer.writerow([stock_name, f'Množství: {data["quantity"]}'])
+        
+        output.seek(0)
+        
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=danova_zprava_{current_year}.csv'}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error exporting tax report: {e}", exc_info=True)
+        return create_error_response('Failed to export tax report', 'EXPORT_ERROR', 500)
 
 if __name__ == '__main__':
     app.run(debug=True, host='127.0.0.1', port=5000)
