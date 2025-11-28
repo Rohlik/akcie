@@ -113,6 +113,8 @@ async function loadHoldings() {
         
         displayHoldings(data.holdings);
         displayProfitLoss(data.holdings);
+        updateProfitLossChart(data.holdings);
+        updatePortfolioDistributionChart(data.holdings);
     } catch (error) {
         handleError(error, 'Chyba při načítání portfolia: ' + error.message);
         document.getElementById('holdings-tbody').innerHTML = 
@@ -504,6 +506,11 @@ window.cancelEditTransaction = async function(transactionId, stockName, contentI
     await loadStockHistory(stockName, contentId);
 };
 
+// Chart instances
+let profitLossChart = null;
+let portfolioDistributionChart = null;
+let yearlyProfitLossChart = null;
+
 // Display profit/loss table
 function displayProfitLoss(holdings) {
     const tbody = document.getElementById('profit-loss-tbody');
@@ -543,6 +550,274 @@ function displayProfitLoss(holdings) {
         `;
     }).join('');
 }
+
+// Update profit/loss bar chart
+function updateProfitLossChart(holdings) {
+    const ctx = document.getElementById('profit-loss-chart');
+    if (!ctx) return;
+    
+    // Filter holdings with valid data
+    const validHoldings = holdings.filter(h => h.profit_loss !== null && h.profit_loss !== undefined);
+    
+    if (validHoldings.length === 0) {
+        if (profitLossChart) {
+            profitLossChart.destroy();
+            profitLossChart = null;
+        }
+        ctx.parentElement.innerHTML = '<p class="loading">Žádná data pro zobrazení</p>';
+        return;
+    }
+    
+    // Sort by profit/loss (descending)
+    const sortedHoldings = [...validHoldings].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
+    
+    const labels = sortedHoldings.map(h => h.stock_name);
+    const profitLossData = sortedHoldings.map(h => h.profit_loss || 0);
+    const colors = profitLossData.map(value => value >= 0 ? '#10b981' : '#ef4444');
+    
+    const chartData = {
+        labels: labels,
+        datasets: [{
+            label: 'Zisk/Ztráta (CZK)',
+            data: profitLossData,
+            backgroundColor: colors,
+            borderColor: colors.map(c => c === '#10b981' ? '#059669' : '#dc2626'),
+            borderWidth: 2,
+            borderRadius: 8,
+            borderSkipped: false,
+        }]
+    };
+    
+    const config = {
+        type: 'bar',
+        data: chartData,
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed.x;
+                            const holding = sortedHoldings[context.dataIndex];
+                            const percent = holding.total_cost > 0 
+                                ? ((value / holding.total_cost) * 100).toFixed(2)
+                                : '0.00';
+                            return [
+                                `Zisk/Ztráta: ${formatCurrency(value)}`,
+                                `Procento: ${percent}%`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return formatCurrency(value);
+                        }
+                    }
+                },
+                y: {
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    };
+    
+    if (profitLossChart) {
+        profitLossChart.destroy();
+    }
+    
+    profitLossChart = new Chart(ctx, config);
+}
+
+// Update portfolio distribution chart
+function updatePortfolioDistributionChart(holdings) {
+    const ctx = document.getElementById('portfolio-distribution-chart');
+    if (!ctx) return;
+    
+    // Filter holdings with valid total value
+    const validHoldings = holdings.filter(h => h.total_value !== null && h.total_value !== undefined && h.total_value > 0);
+    
+    if (validHoldings.length === 0) {
+        if (portfolioDistributionChart) {
+            portfolioDistributionChart.destroy();
+            portfolioDistributionChart = null;
+        }
+        ctx.parentElement.innerHTML = '<p class="loading">Žádná data pro zobrazení</p>';
+        return;
+    }
+    
+    // Sort by total value (descending)
+    const sortedHoldings = [...validHoldings].sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
+    
+    const labels = sortedHoldings.map(h => h.stock_name);
+    const values = sortedHoldings.map(h => h.total_value || 0);
+    
+    // Generate colors - use a nice color palette
+    const colorPalette = [
+        '#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1'
+    ];
+    const backgroundColors = values.map((_, i) => colorPalette[i % colorPalette.length]);
+    
+    const chartData = {
+        labels: labels,
+        datasets: [{
+            data: values,
+            backgroundColor: backgroundColors,
+            borderColor: '#ffffff',
+            borderWidth: 2,
+        }]
+    };
+    
+    const config = {
+        type: 'doughnut',
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: {
+                        padding: 15,
+                        font: {
+                            size: 12
+                        },
+                        generateLabels: function(chart) {
+                            const data = chart.data;
+                            if (data.labels.length && data.datasets.length) {
+                                return data.labels.map((label, i) => {
+                                    const value = data.datasets[0].data[i];
+                                    const total = data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                    const percentage = ((value / total) * 100).toFixed(1);
+                                    return {
+                                        text: `${label}: ${formatCurrency(value)} (${percentage}%)`,
+                                        fillStyle: data.datasets[0].backgroundColor[i],
+                                        strokeStyle: data.datasets[0].borderColor,
+                                        lineWidth: data.datasets[0].borderWidth,
+                                        hidden: false,
+                                        index: i
+                                    };
+                                });
+                            }
+                            return [];
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return [
+                                `${label}: ${formatCurrency(value)}`,
+                                `${percentage}% portfolia`
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+    };
+    
+    if (portfolioDistributionChart) {
+        portfolioDistributionChart.destroy();
+    }
+    
+    portfolioDistributionChart = new Chart(ctx, config);
+}
+
+// Toggle profit/loss view
+window.toggleProfitLossView = function(view) {
+    const chartContainer = document.getElementById('profit-loss-chart-container');
+    const tableContainer = document.getElementById('profit-loss-table-container');
+    const buttons = document.querySelectorAll('[onclick*="toggleProfitLossView"]');
+    
+    if (view === 'chart') {
+        chartContainer.style.display = 'block';
+        tableContainer.style.display = 'none';
+        buttons.forEach(btn => {
+            if (btn.getAttribute('data-view') === 'chart') {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    } else {
+        chartContainer.style.display = 'none';
+        tableContainer.style.display = 'block';
+        buttons.forEach(btn => {
+            if (btn.getAttribute('data-view') === 'table') {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+};
+
+// Toggle yearly profit/loss view
+window.toggleYearlyProfitLossView = function(view) {
+    const chartContainer = document.getElementById('yearly-profit-loss-chart-container');
+    const tableContainer = document.getElementById('yearly-profit-loss-table-container');
+    const buttons = document.querySelectorAll('[onclick*="toggleYearlyProfitLossView"]');
+    
+    if (view === 'chart') {
+        chartContainer.style.display = 'block';
+        tableContainer.style.display = 'none';
+        buttons.forEach(btn => {
+            if (btn.getAttribute('data-view') === 'chart') {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    } else {
+        chartContainer.style.display = 'none';
+        tableContainer.style.display = 'block';
+        buttons.forEach(btn => {
+            if (btn.getAttribute('data-view') === 'table') {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+};
 
 // Load and display tax info
 async function loadTaxInfo() {
@@ -807,6 +1082,7 @@ async function loadYearlyProfitLoss() {
         }
         
         displayYearlyProfitLoss(data.yearly_data);
+        updateYearlyProfitLossChart(data.yearly_data);
     } catch (error) {
         handleError(error, 'Chyba při načítání ročních zisků/ztrát');
         document.getElementById('yearly-profit-loss-tbody').innerHTML = 
@@ -843,6 +1119,105 @@ function displayYearlyProfitLoss(yearlyData) {
             </tr>
         `;
     }).join('');
+}
+
+// Update yearly profit/loss chart
+function updateYearlyProfitLossChart(yearlyData) {
+    const ctx = document.getElementById('yearly-profit-loss-chart');
+    if (!ctx) return;
+    
+    if (!yearlyData || yearlyData.length === 0) {
+        if (yearlyProfitLossChart) {
+            yearlyProfitLossChart.destroy();
+            yearlyProfitLossChart = null;
+        }
+        ctx.parentElement.innerHTML = '<p class="loading">Žádné prodeje</p>';
+        return;
+    }
+    
+    // Sort by year descending
+    const sortedData = [...yearlyData].sort((a, b) => b.year - a.year);
+    
+    const labels = sortedData.map(d => d.year.toString());
+    const profitLossData = sortedData.map(d => d.profit_loss || 0);
+    const colors = profitLossData.map(value => value >= 0 ? '#10b981' : '#ef4444');
+    
+    const chartData = {
+        labels: labels,
+        datasets: [{
+            label: 'Zisk/Ztráta (CZK)',
+            data: profitLossData,
+            backgroundColor: colors,
+            borderColor: colors.map(c => c === '#10b981' ? '#059669' : '#dc2626'),
+            borderWidth: 2,
+            borderRadius: 8,
+            borderSkipped: false,
+        }]
+    };
+    
+    const config = {
+        type: 'bar',
+        data: chartData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    padding: 12,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 13
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            const value = context.parsed.y;
+                            const yearData = sortedData[context.dataIndex];
+                            const percent = yearData.total_cost > 0 
+                                ? ((value / yearData.total_cost) * 100).toFixed(2)
+                                : '0.00';
+                            return [
+                                `Zisk/Ztráta: ${formatCurrency(value)}`,
+                                `Prodeje: ${formatCurrency(yearData.total_sales)}`,
+                                `Náklady: ${formatCurrency(yearData.total_cost)}`,
+                                `Procento: ${percent}%`
+                            ];
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.05)'
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return formatCurrency(value);
+                        }
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    };
+    
+    if (yearlyProfitLossChart) {
+        yearlyProfitLossChart.destroy();
+    }
+    
+    yearlyProfitLossChart = new Chart(ctx, config);
 }
 
 // Set today's date as default in date picker and configure calendar
