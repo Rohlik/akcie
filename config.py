@@ -15,10 +15,10 @@ class Config:
     THREE_YEAR_EXEMPTION_DAYS = 3 * 365  # 3 years in days
     
     # Input Validation
-    MAX_STOCK_NAME_LENGTH = 50
-    MAX_PRICE = 10000000  # 10M CZK per share
+    MAX_STOCK_NAME_LENGTH = 40
+    MAX_PRICE = 1000000  # 1M CZK per share
     MAX_QUANTITY = 1000000  # 1M shares
-    MAX_FEES = 1000000  # 1M CZK
+    MAX_FEES = 1000  # 1K CZK
     
     # Logging
     LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')

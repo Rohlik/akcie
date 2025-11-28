@@ -67,6 +67,7 @@ Type=simple
 User=your-username
 WorkingDirectory=/var/www/html/akcie
 Environment="PATH=/var/www/html/akcie/venv/bin"
+Environment="SECRET_KEY=superSecret007"
 ExecStart=/var/www/html/akcie/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 1 app:app
 Restart=always
 RestartSec=10
