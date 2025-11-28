@@ -134,8 +134,8 @@ def calculate_current_year_sales(transactions, current_year=None):
             remaining_to_sell = tx['quantity']
             stock_holdings = holdings.get(stock_name, [])
             
-            # Track if any of the sold shares were held <3 years
-            has_less_than_3_years = False
+            # Track how many shares were held <3 years (to count only that portion)
+            shares_held_less_than_3_years = 0
             
             i = 0
             while remaining_to_sell > 0 and i < len(stock_holdings):
@@ -146,29 +146,43 @@ def calculate_current_year_sales(transactions, current_year=None):
                 if purchase_date <= tx_date:
                     # Check if this purchase was held <3 years at time of sale
                     days_held = (tx_date - purchase_date).days
+                    
+                    # Calculate how many shares from this purchase are being sold
+                    shares_from_this_purchase = min(holding['quantity'], remaining_to_sell)
+                    
                     if days_held <= Config.THREE_YEAR_EXEMPTION_DAYS:
-                        has_less_than_3_years = True
+                        # This portion was held <3 years, count it
+                        shares_held_less_than_3_years += shares_from_this_purchase
                     
                     if holding['quantity'] <= remaining_to_sell:
+                        # This purchase is fully sold
                         remaining_to_sell -= holding['quantity']
                         stock_holdings.pop(i)
+                        # Don't increment i because next element moved to current position
                     else:
+                        # Partial sale of this purchase
                         holding['quantity'] -= remaining_to_sell
                         remaining_to_sell = 0
-                i += 1
+                        i += 1
+                else:
+                    # Skip holdings purchased after sale date
+                    i += 1
             
             # Update holdings dictionary
             holdings[stock_name] = stock_holdings
             
             # Check if this sale is in current tax year
             if year_start <= tx_date <= year_end:
-                # Only count sales if they include stocks held <3 years
-                # If all sold stocks were held >3 years, don't count against 100k limit
-                if has_less_than_3_years:
+                # Only count the portion of sales that were held <3 years
+                if shares_held_less_than_3_years > 0:
                     tx_fees = tx.get('fees', 0.0) or 0.0
-                    # Net sale value = (price * quantity) - fees
-                    total_sales += (tx['price'] * tx['quantity']) - tx_fees
-                # Note: If has_less_than_3_years is False, the entire sale was of stocks held >3 years
+                    total_shares_sold = tx['quantity']
+                    # Calculate total net sale value (revenue - fees)
+                    total_net_sale_value = (tx['price'] * total_shares_sold) - tx_fees
+                    # Calculate proportional value: only count the portion held <3 years
+                    proportional_value = (shares_held_less_than_3_years / total_shares_sold) * total_net_sale_value
+                    total_sales += proportional_value
+                # Note: If shares_held_less_than_3_years is 0, all sold stocks were held >3 years
                 # and should not count against the 100k limit
     
     return total_sales
