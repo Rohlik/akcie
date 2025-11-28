@@ -568,6 +568,25 @@ function updateProfitLossChart(holdings) {
         return;
     }
     
+    // Calculate dynamic height based on number of stocks
+    // Each bar needs approximately 50px, plus padding (100px top/bottom, 60px for labels)
+    const minHeight = 300;
+    const heightPerBar = 50;
+    const padding = 160;
+    
+    // Adjust for mobile devices (smaller bars)
+    const isMobile = window.innerWidth <= 768;
+    const adjustedHeightPerBar = isMobile ? 40 : heightPerBar;
+    const adjustedPadding = isMobile ? 120 : padding;
+    
+    const calculatedHeight = Math.max(minHeight, (validHoldings.length * adjustedHeightPerBar) + adjustedPadding);
+    
+    // Set the container height dynamically
+    const chartContainer = ctx.closest('.chart-container');
+    if (chartContainer) {
+        chartContainer.style.height = `${calculatedHeight}px`;
+    }
+    
     // Sort by profit/loss (descending)
     const sortedHoldings = [...validHoldings].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
     
@@ -777,6 +796,22 @@ window.toggleProfitLossView = function(view) {
                 btn.classList.remove('active');
             }
         });
+        // Recalculate chart height when switching to chart view
+        // Small delay to ensure container is visible
+        setTimeout(() => {
+            if (profitLossChart && profitLossChart.data && profitLossChart.data.labels) {
+                const numStocks = profitLossChart.data.labels.length;
+                const minHeight = 300;
+                const heightPerBar = window.innerWidth <= 768 ? 40 : 50;
+                const padding = window.innerWidth <= 768 ? 120 : 160;
+                const calculatedHeight = Math.max(minHeight, (numStocks * heightPerBar) + padding);
+                const chartContainerDiv = document.querySelector('#profit-loss-chart .chart-container');
+                if (chartContainerDiv) {
+                    chartContainerDiv.style.height = `${calculatedHeight}px`;
+                    profitLossChart.resize();
+                }
+            }
+        }, 100);
     } else {
         chartContainer.style.display = 'none';
         tableContainer.style.display = 'block';
@@ -1275,5 +1310,26 @@ document.addEventListener('DOMContentLoaded', () => {
     loadHoldings();
     loadTaxInfo();
     loadYearlyProfitLoss();
+    
+    // Handle window resize to recalculate chart heights
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            // Recalculate profit/loss chart height if it exists
+            if (profitLossChart && profitLossChart.data && profitLossChart.data.labels) {
+                const numStocks = profitLossChart.data.labels.length;
+                const minHeight = 300;
+                const heightPerBar = window.innerWidth <= 768 ? 40 : 50;
+                const padding = window.innerWidth <= 768 ? 120 : 160;
+                const calculatedHeight = Math.max(minHeight, (numStocks * heightPerBar) + padding);
+                const chartContainer = document.querySelector('#profit-loss-chart-container .chart-container');
+                if (chartContainer) {
+                    chartContainer.style.height = `${calculatedHeight}px`;
+                    profitLossChart.resize();
+                }
+            }
+        }, 250);
+    });
 });
 
