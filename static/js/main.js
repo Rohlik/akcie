@@ -865,7 +865,20 @@ async function loadTaxInfo() {
             throw new Error(errorMsg);
         }
         
-        document.getElementById('current-year-sales').textContent = formatCurrency(data.current_year_sales);
+        const currentYearSalesElement = document.getElementById('current-year-sales');
+        const currentYearSales = data.current_year_sales || 0;
+        currentYearSalesElement.textContent = formatCurrency(currentYearSales);
+        
+        // Change color to red if there are sales (non-zero), keep default (black) if 0
+        if (currentYearSales > 0) {
+            currentYearSalesElement.style.color = 'var(--danger-color)';
+            currentYearSalesElement.style.fontWeight = '600';
+        } else {
+            currentYearSalesElement.style.color = '';
+            currentYearSalesElement.style.fontWeight = '';
+        }
+        
+        document.getElementById('current-year-sales-three-years').textContent = formatCurrency(data.current_year_sales_three_years || 0);
         document.getElementById('remaining-capacity').textContent = formatCurrency(data.remaining_tax_free_capacity);
         document.getElementById('three-year-value').textContent = formatCurrency(data.three_year_total_value);
     } catch (error) {

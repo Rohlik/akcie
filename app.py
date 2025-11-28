@@ -7,6 +7,7 @@ from tax_calculator import (
     calculate_holdings,
     get_three_year_holdings,
     calculate_current_year_sales,
+    calculate_current_year_sales_three_years,
     calculate_tax_free_capacity,
     aggregate_holdings_by_stock
 )
@@ -133,6 +134,7 @@ def get_tax_info_api():
         # Calculate current year sales
         current_year = datetime.now().year
         current_year_sales = calculate_current_year_sales(transactions, current_year)
+        current_year_sales_three_years = calculate_current_year_sales_three_years(transactions, current_year)
         
         # Calculate remaining tax-free capacity
         remaining_capacity = calculate_tax_free_capacity(current_year_sales)
@@ -153,6 +155,7 @@ def get_tax_info_api():
         
         return jsonify({
             'current_year_sales': current_year_sales,
+            'current_year_sales_three_years': current_year_sales_three_years,
             'remaining_tax_free_capacity': remaining_capacity,
             'tax_free_limit': Config.TAX_FREE_LIMIT,
             'three_year_holdings': three_year,
