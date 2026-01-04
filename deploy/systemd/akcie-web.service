@@ -1,5 +1,5 @@
 [Unit]
-Description=Web pro sledovani akcii a danove optimalizace
+Description=Web pro sledovani danove optimalizace akcioveho portfolia
 After=network.target
 
 [Service]
@@ -12,10 +12,9 @@ WorkingDirectory=/var/www/html/akcie
 # Environment variables (SECRET_KEY etc.)
 EnvironmentFile=/etc/akcie-web.env
 
-# Ensure instance/ exists
+# Ensure instance/ folder exists
 ExecStartPre=/usr/bin/mkdir -p /var/www/html/akcie/instance
 
-# Gunicorn (recommended for production)
 ExecStart=/var/www/html/akcie/venv/bin/gunicorn --config /var/www/html/akcie/deploy/gunicorn/gunicorn.conf.py app:app
 
 Restart=always

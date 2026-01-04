@@ -55,47 +55,7 @@ python app.py
 
 ### Produkční nasazení (trvalé spuštění)
 
-Pro trvalé spuštění aplikace použijte systemd service. Vytvořte soubor `/etc/systemd/system/prague-stock-tracker.service`:
-
-```ini
-[Unit]
-Description=Prague Stock Exchange Tracker
-After=network.target
-
-[Service]
-Type=simple
-User=your-username
-WorkingDirectory=/var/www/html/akcie
-Environment="PATH=/var/www/html/akcie/venv/bin"
-Environment="SECRET_KEY=superSecret007"
-ExecStart=/var/www/html/akcie/venv/bin/gunicorn --bind 127.0.0.1:5000 --workers 1 app:app
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Nainstalujte gunicorn:
-```bash
-pip install gunicorn
-```
-
-Aktivujte a spusťte službu:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable prague-stock-tracker
-sudo systemctl start prague-stock-tracker
-```
-
-Kontrola stavu:
-```bash
-sudo systemctl status prague-stock-tracker
-```
-
-**Alternativa:** Můžete také použít jiné WSGI servery jako uWSGI nebo Waitress.
-
-**Tip:** Příklad produkčních konfiguračních souborů (systemd + gunicorn + Apache2 reverse proxy) najdete ve složce `deploy/`.
+**Příklad produkčních konfiguračních souborů (systemd + gunicorn + Apache2 reverse proxy) najdete ve složce `deploy/`.**
 
 ## Použití
 
@@ -133,37 +93,6 @@ Akcie držené déle než 3 roky jsou zvýrazněny zelenou barvou v tabulce port
 ## Databáze
 
 Aplikace používá SQLite databázi uloženou v `instance/portfolio.db`. Databáze se vytvoří automaticky při prvním spuštění.
-
-## Nasazení za Apache2 reverse proxy
-
-1. Spusťte Flask aplikaci na localhost (např. port 5000)
-
-2. Nakonfigurujte Apache2 reverse proxy. Příklad konfigurace:
-
-```apache
-<VirtualHost *:80>
-    ServerName your-domain.com
-    
-    ProxyPreserveHost On
-    ProxyPass / http://127.0.0.1:5000/
-    ProxyPassReverse / http://127.0.0.1:5000/
-    
-    # Basic authentication (volitelné)
-    <Location />
-        AuthType Basic
-        AuthName "Restricted Access"
-        AuthUserFile /path/to/.htpasswd
-        Require valid-user
-    </Location>
-</VirtualHost>
-```
-
-3. Povolte potřebné moduly:
-```bash
-sudo a2enmod proxy
-sudo a2enmod proxy_http
-sudo systemctl restart apache2
-```
 
 ## Struktura projektu
 
@@ -205,5 +134,9 @@ Aplikace implementuje následující pravidla:
 
 ## Licence
 
-Tento projekt je poskytován "tak jak je" pro osobní použití.
+Tento projekt je licencován pod [MIT License](LICENSE).
+
+Copyright (c) 2026 @Rohlik
+
+MIT License umožňuje volné použití, úpravy a distribuci za podmínky, že bude zachován copyright notice a text licence.
 

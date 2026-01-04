@@ -106,7 +106,7 @@ sudo systemctl restart httpd
 ```
 
 ### Poznámky
-
 - Gunicorn je nastavený tak, aby bindoval na `127.0.0.1:5000` (jen lokálně) a Apache na něj proxyuje.
+- **Alternativa:** Namísto gunicorn lze také použít jiné WSGI servery jako uWSGI nebo Waitress.
 - Databáze je v `instance/portfolio.db` v adresáři projektu (ujisti se, že uživatel definovaný v systemd unit souboru do ní může zapisovat).
 
