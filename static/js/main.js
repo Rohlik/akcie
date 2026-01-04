@@ -17,6 +17,9 @@ async function getCsrfToken() {
 // Loading state management
 const loadingStates = new Set();
 
+// Cached quantities for sell validation (current holdings)
+let availableSellQuantities = {};
+
 function setLoading(elementId, isLoading) {
     if (isLoading) {
         loadingStates.add(elementId);
@@ -161,7 +164,14 @@ function displayHoldings(holdings) {
             <tr class="history-row" id="${historyId}" style="display: none;">
                 <td colspan="7" class="history-cell">
                     <div class="history-content">
-                        <h4>Historie transakcí pro ${holding.stock_name}</h4>
+                        <h4>
+                            Historie transakcí pro
+                            <a href="https://finance.yahoo.com/quote/${encodeURIComponent(holding.stock_name)}"
+                               target="_blank"
+                               rel="noopener noreferrer">
+                                ${holding.stock_name}
+                            </a>
+                        </h4>
                         <div id="history-content-${index}" class="loading">Načítání...</div>
                     </div>
                 </td>
@@ -857,17 +867,53 @@ window.toggleYearlyProfitLossView = function(view) {
 // Load and display tax info
 async function loadTaxInfo() {
     try {
-        const response = await fetch('/api/tax-info');
+        const yearSelect = document.getElementById('tax-year-select');
+        const selectedYear =
+            (yearSelect && yearSelect.value && !Number.isNaN(parseInt(yearSelect.value, 10)))
+                ? parseInt(yearSelect.value, 10)
+                : new Date().getFullYear();
+
+        const response = await fetch(`/api/tax-info?year=${encodeURIComponent(selectedYear)}`);
         const data = await response.json();
         
         if (!response.ok) {
             const errorMsg = data.error?.message || data.error || 'Failed to load tax info';
             throw new Error(errorMsg);
         }
+
+        // Populate year selector (years with any sales; always include current year)
+        if (yearSelect && Array.isArray(data.available_years)) {
+            const years = data.available_years;
+            const existing = Array.from(yearSelect.options)
+                .map(o => parseInt(o.value, 10))
+                .filter(v => !Number.isNaN(v));
+
+            const same =
+                existing.length === years.length &&
+                existing.every((v, i) => v === years[i]);
+
+            if (!same) {
+                yearSelect.innerHTML = years.map(y => `<option value="${y}">${y}</option>`).join('');
+            }
+
+            const toSelect = data.selected_year || selectedYear;
+            yearSelect.value = String(toSelect);
+
+            if (!yearSelect.dataset.initialized) {
+                yearSelect.dataset.initialized = '1';
+                yearSelect.addEventListener('change', () => loadTaxInfo());
+            }
+        }
         
         const currentYearSalesElement = document.getElementById('current-year-sales');
         const currentYearSales = data.current_year_sales || 0;
         currentYearSalesElement.textContent = formatCurrency(currentYearSales);
+
+        // Update selected year labels in UI
+        const yearLabel1 = document.getElementById('tax-selected-year-label');
+        const yearLabel2 = document.getElementById('tax-selected-year-label-2');
+        if (yearLabel1) yearLabel1.textContent = data.selected_year || selectedYear;
+        if (yearLabel2) yearLabel2.textContent = data.selected_year || selectedYear;
         
         // Change color to red if there are sales (non-zero), keep default (black) if 0
         if (currentYearSales > 0) {
@@ -947,6 +993,14 @@ function validateTransactionForm() {
         showFieldError(quantityInput, 'Množství musí být větší než 0');
         isValid = false;
     }
+
+    // Sell-specific validation: prevent overselling current holdings
+    if (type === 'sell') {
+        const ok = validateSellQuantityAgainstHoldings(true);
+        if (!ok) {
+            isValid = false;
+        }
+    }
     
     // Validate fees
     const fees = parseFloat(feesInput.value) || 0;
@@ -969,6 +1023,59 @@ function showFieldError(input, message) {
     input.style.borderColor = 'var(--danger-color)';
 }
 
+function updateSellQuantityLimit(showErrors = false) {
+    const type = document.getElementById('type')?.value;
+    if (type !== 'sell') return;
+
+    const selectInput = document.getElementById('stock_name_select');
+    const quantityInput = document.getElementById('quantity');
+    if (!selectInput || !quantityInput) return;
+
+    const stockName = selectInput.value;
+    const selectedOption = selectInput.options[selectInput.selectedIndex];
+    const maxQty = stockName
+        ? (availableSellQuantities[stockName] ??
+            parseInt(selectedOption?.getAttribute('data-available-qty') || '0', 10))
+        : null;
+
+    if (maxQty !== null && !Number.isNaN(maxQty) && maxQty > 0) {
+        quantityInput.setAttribute('max', String(maxQty));
+    } else {
+        quantityInput.removeAttribute('max');
+    }
+
+    if (showErrors) {
+        validateSellQuantityAgainstHoldings(true);
+    }
+}
+
+function validateSellQuantityAgainstHoldings(showFieldErrorMessage = false) {
+    const type = document.getElementById('type')?.value;
+    if (type !== 'sell') return true;
+
+    const selectInput = document.getElementById('stock_name_select');
+    const quantityInput = document.getElementById('quantity');
+    if (!selectInput || !quantityInput) return true;
+
+    const stockName = selectInput.value;
+    if (!stockName) return true;
+
+    const maxQty = availableSellQuantities[stockName] ?? 0;
+    const qty = parseInt(quantityInput.value, 10) || 0;
+
+    if (maxQty > 0 && qty > maxQty) {
+        if (showFieldErrorMessage) {
+            showFieldError(
+                quantityInput,
+                'Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací.'
+            );
+        }
+        return false;
+    }
+
+    return true;
+}
+
 // Load available stocks for sell dropdown
 async function loadAvailableStocks() {
     try {
@@ -983,10 +1090,32 @@ async function loadAvailableStocks() {
         const selectInput = document.getElementById('stock_name_select');
         const availableStocks = data.holdings.filter(h => h.quantity > 0);
         
+        // Cache quantities for sell validation
+        availableSellQuantities = {};
+        availableStocks.forEach(h => {
+            availableSellQuantities[h.stock_name] = h.quantity;
+        });
+
         selectInput.innerHTML = '<option value="">Vyberte akcii...</option>' +
-            availableStocks.map(h => 
-                `<option value="${h.stock_name}">${h.stock_name} (${formatNumber(h.quantity)} ks)</option>`
+            availableStocks.map(h =>
+                `<option value="${h.stock_name}" data-available-qty="${h.quantity}">${h.stock_name} (${formatNumber(h.quantity)} ks)</option>`
             ).join('');
+
+        // Setup listeners (only once)
+        const quantityInput = document.getElementById('quantity');
+        if (!selectInput.dataset.qtyListeners) {
+            selectInput.dataset.qtyListeners = '1';
+            selectInput.addEventListener('change', () => updateSellQuantityLimit(true));
+            if (quantityInput) {
+                quantityInput.addEventListener('input', () => {
+                    if (document.getElementById('type')?.value === 'sell') {
+                        updateSellQuantityLimit(true);
+                    }
+                });
+            }
+        }
+
+        updateSellQuantityLimit(false);
     } catch (error) {
         handleError(error, 'Chyba při načítání dostupných akcií');
     }

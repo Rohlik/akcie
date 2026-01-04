@@ -95,6 +95,8 @@ sudo systemctl status prague-stock-tracker
 
 **Alternativa:** Můžete také použít jiné WSGI servery jako uWSGI nebo Waitress.
 
+**Tip:** Příklad produkčních konfiguračních souborů (systemd + gunicorn + Apache2 reverse proxy) najdete ve složce `deploy/`.
+
 ## Použití
 
 ### Přidání transakce

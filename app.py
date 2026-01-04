@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from flask_wtf.csrf import CSRFProtect, generate_csrf
 from datetime import datetime, timedelta
 import logging
+import os
 from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices, get_transaction, update_transaction, delete_transaction
 from tax_calculator import (
     calculate_holdings,
@@ -9,22 +10,30 @@ from tax_calculator import (
     calculate_current_year_sales,
     calculate_current_year_sales_three_years,
     calculate_tax_free_capacity,
-    aggregate_holdings_by_stock
+    aggregate_holdings_by_stock,
+    validate_no_oversell
 )
 from yahoo_finance import update_all_prices, get_cached_price
 from config import Config
 from utils import sanitize_input, sanitize_stock_name, validate_transaction_data, create_error_response, create_success_response
 
-# Configure logging
+# Configure logging (prefer file + stdout; fall back to stdout if file is not writable)
+_log_handlers = [logging.StreamHandler()]
+_file_handler_enabled = False
+try:
+    _log_handlers.insert(0, logging.FileHandler(Config.LOG_FILE))
+    _file_handler_enabled = True
+except Exception:
+    _file_handler_enabled = False
+
 logging.basicConfig(
     level=getattr(logging, Config.LOG_LEVEL),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(Config.LOG_FILE),
-        logging.StreamHandler()
-    ]
+    handlers=_log_handlers
 )
 logger = logging.getLogger(__name__)
+if not _file_handler_enabled:
+    logger.warning("File logging disabled (cannot write LOG_FILE). Using stdout only.")
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -63,6 +72,20 @@ def add_transaction_api():
         if not is_valid:
             return create_error_response(error_msg, 'VALIDATION_ERROR', 400)
         
+        # Prevent selling more than held (guarantees correctness of FIFO/tax computations)
+        if sanitized_data['type'] == 'sell':
+            existing = get_all_transactions()
+            proposed = dict(sanitized_data)
+            # best-effort created_at for ordering (DB orders by date, created_at)
+            proposed['created_at'] = datetime.now().isoformat()
+            ok, msg = validate_no_oversell(existing + [proposed])
+            if not ok:
+                return create_error_response(
+                    msg or "Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací.",
+                    'OVERSALE_NOT_ALLOWED',
+                    400
+                )
+
         transaction_id = add_transaction(
             sanitized_data['type'],
             sanitized_data['stock_name'],
@@ -131,10 +154,25 @@ def get_tax_info_api():
         transactions = get_all_transactions()
         holdings = calculate_holdings(transactions)
         
-        # Calculate current year sales
+        # Selected year (default: current year). Also return years where any sell happened.
         current_year = datetime.now().year
-        current_year_sales = calculate_current_year_sales(transactions, current_year)
-        current_year_sales_three_years = calculate_current_year_sales_three_years(transactions, current_year)
+        year_param = request.args.get('year')
+        try:
+            selected_year = int(year_param) if year_param else current_year
+        except (TypeError, ValueError):
+            selected_year = current_year
+
+        sell_years = sorted(
+            {datetime.strptime(tx['date'], '%Y-%m-%d').year for tx in transactions if tx.get('type') == 'sell'},
+            reverse=True
+        )
+        available_years = sell_years if sell_years else []
+        if current_year not in available_years:
+            available_years = [current_year] + available_years
+
+        # Calculate selected year sales
+        current_year_sales = calculate_current_year_sales(transactions, selected_year)
+        current_year_sales_three_years = calculate_current_year_sales_three_years(transactions, selected_year)
         
         # Calculate remaining tax-free capacity
         remaining_capacity = calculate_tax_free_capacity(current_year_sales)
@@ -159,7 +197,9 @@ def get_tax_info_api():
             'remaining_tax_free_capacity': remaining_capacity,
             'tax_free_limit': Config.TAX_FREE_LIMIT,
             'three_year_holdings': three_year,
-            'three_year_total_value': three_year_total_value
+            'three_year_total_value': three_year_total_value,
+            'selected_year': selected_year,
+            'available_years': available_years
         }), 200
         
     except Exception as e:
@@ -245,6 +285,29 @@ def update_transaction_api(transaction_id):
         if not is_valid:
             return create_error_response(error_msg, 'VALIDATION_ERROR', 400)
         
+        # Prevent changes that would lead to overselling (covers edits to buys too)
+        all_txs = get_all_transactions()
+        modified = []
+        for tx in all_txs:
+            if tx['id'] == transaction_id:
+                new_tx = dict(tx)
+                new_tx.update({
+                    'date': sanitized_data['date'],
+                    'price': sanitized_data['price'],
+                    'quantity': sanitized_data['quantity'],
+                    'fees': sanitized_data['fees']
+                })
+                modified.append(new_tx)
+            else:
+                modified.append(tx)
+        ok, msg = validate_no_oversell(modified)
+        if not ok:
+            return create_error_response(
+                msg or "Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací.",
+                'OVERSALE_NOT_ALLOWED',
+                400
+            )
+
         # Update transaction
         success = update_transaction(
             transaction_id,
@@ -274,6 +337,17 @@ def delete_transaction_api(transaction_id):
         if not transaction:
             return create_error_response('Transaction not found', 'NOT_FOUND', 404)
         
+        # Prevent delete that would lead to overselling (e.g., deleting a buy that backs later sells)
+        all_txs = get_all_transactions()
+        modified = [tx for tx in all_txs if tx['id'] != transaction_id]
+        ok, msg = validate_no_oversell(modified)
+        if not ok:
+            return create_error_response(
+                msg or "Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací.",
+                'OVERSALE_NOT_ALLOWED',
+                400
+            )
+
         # Delete transaction
         success = delete_transaction(transaction_id)
         
@@ -457,5 +531,8 @@ def export_tax_report_csv():
         return create_error_response('Failed to export tax report', 'EXPORT_ERROR', 500)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='127.0.0.1', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', '').lower() in ('1', 'true', 'yes', 'on')
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    port = int(os.environ.get('FLASK_PORT', '5000'))
+    app.run(debug=debug, host=host, port=port)
 

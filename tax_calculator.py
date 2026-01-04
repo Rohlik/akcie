@@ -2,6 +2,40 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from config import Config
 
+def validate_no_oversell(transactions):
+    """
+    Validate that across all transactions (chronological order) no stock is ever sold
+    into a negative position.
+
+    Returns:
+        (ok: bool, error_message: Optional[str])
+    """
+    # Sort transactions defensively (models already returns date ASC, created_at ASC)
+    def sort_key(tx):
+        d = tx.get('date')
+        try:
+            dt = datetime.strptime(d, '%Y-%m-%d')
+        except Exception:
+            dt = datetime.min
+        created_at = tx.get('created_at') or ''
+        return (dt, created_at)
+
+    qty_by_stock = defaultdict(int)
+    for tx in sorted(transactions, key=sort_key):
+        stock_name = tx.get('stock_name')
+        if not stock_name:
+            continue
+        tx_type = tx.get('type')
+        quantity = int(tx.get('quantity') or 0)
+        if tx_type == 'buy':
+            qty_by_stock[stock_name] += quantity
+        elif tx_type == 'sell':
+            qty_by_stock[stock_name] -= quantity
+            if qty_by_stock[stock_name] < 0:
+                return False, "Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací."
+
+    return True, None
+
 def calculate_holdings(transactions):
     """
     Apply FIFO to determine current holdings.

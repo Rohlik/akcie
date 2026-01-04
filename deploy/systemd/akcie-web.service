@@ -1,0 +1,25 @@
+[Unit]
+Description=Web pro sledovani akcii a danove optimalizace
+After=network.target
+
+[Service]
+Type=simple
+
+# CHANGE THESE:
+User=your-username
+WorkingDirectory=/var/www/html/akcie
+
+# Environment variables (SECRET_KEY etc.)
+EnvironmentFile=/etc/akcie-web.env
+
+# Ensure instance/ exists
+ExecStartPre=/usr/bin/mkdir -p /var/www/html/akcie/instance
+
+# Gunicorn (recommended for production)
+ExecStart=/var/www/html/akcie/venv/bin/gunicorn --config /var/www/html/akcie/deploy/gunicorn/gunicorn.conf.py app:app
+
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
