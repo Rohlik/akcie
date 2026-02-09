@@ -1,6 +1,6 @@
 # Prague Stock Exchange Tracker
 
-Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou optimalizací podle českých zákonů.
+Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou optimalizací podle českých zákonů. Vhodná pro drobné investory.
 
 ## Foto ukázky
 <img src="ukazka-transakce.png" alt="Ukázka - detail transakce" width="35%">  
@@ -62,7 +62,7 @@ python app.py
 
 ## Použití
 
-### Přidání transakce
+### Přidání transakce - manuálně
 
 1. Vyplňte formulář:
    - Typ transakce (Nákup/Prodej)
@@ -134,6 +134,7 @@ Aplikace implementuje následující pravidla:
 - Yahoo Finance API může mít omezení rychlosti. Při častém aktualizování cen může dojít k dočasným chybám.
 - Ceny jsou ukládány do cache v databázi pro rychlejší načítání.
 - Pokud není cena dostupná, zobrazí se jako "Nedostupné".
+- Webová aplikace aktuálně nepodporuje import portfolia přes API nebo export/import.
 
 ## Licence
 
