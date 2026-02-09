@@ -1,3 +1,137 @@
+// =============================================
+// Theme management (light / dark / auto)
+// =============================================
+const ThemeManager = (() => {
+    // Possible modes stored in cookie: 'light', 'dark', 'auto'
+    // 'auto' means follow OS preference.
+    const COOKIE_NAME = 'theme';
+    const COOKIE_MAX_AGE = 365 * 24 * 60 * 60; // 1 year
+
+    // Icons for each mode
+    const ICONS = { light: '\u2600\uFE0F', dark: '\uD83C\uDF19', auto: '\uD83D\uDCBB' };
+    // Labels (Czech)
+    const LABELS = { light: 'Světlý', dark: 'Tmavý', auto: 'Auto' };
+    // Tooltips (Czech)
+    const TITLES = { light: 'Motiv: Světlý (klikněte pro tmavý)', dark: 'Motiv: Tmavý (klikněte pro automatický)', auto: 'Motiv: Automatický (klikněte pro světlý)' };
+    // Cycle order: auto -> light -> dark -> auto ...
+    const CYCLE = ['auto', 'light', 'dark'];
+
+    let currentMode = window.__themeMode || 'auto';
+
+    function getCookie() {
+        const match = document.cookie.match(/(?:^|;\s*)theme=([^;]*)/);
+        return match ? match[1] : null;
+    }
+
+    function setCookie(value) {
+        document.cookie = `${COOKIE_NAME}=${value};path=/;max-age=${COOKIE_MAX_AGE};SameSite=Lax`;
+    }
+
+    function resolveTheme(mode) {
+        if (mode === 'light' || mode === 'dark') return mode;
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+
+    function applyTheme(theme) {
+        if (theme === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+        }
+    }
+
+    function updateIcon() {
+        const iconEl = document.getElementById('theme-icon');
+        const labelEl = document.getElementById('theme-label');
+        const btn = document.getElementById('theme-toggle');
+        if (iconEl) iconEl.textContent = ICONS[currentMode];
+        if (labelEl) labelEl.textContent = LABELS[currentMode];
+        if (btn) btn.title = TITLES[currentMode];
+    }
+
+    function isDark() {
+        return resolveTheme(currentMode) === 'dark';
+    }
+
+    function getChartTextColor() {
+        return isDark() ? '#cbd5e1' : '#374151';
+    }
+
+    function getChartGridColor() {
+        return isDark() ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)';
+    }
+
+    function toggle() {
+        const idx = CYCLE.indexOf(currentMode);
+        currentMode = CYCLE[(idx + 1) % CYCLE.length];
+        setCookie(currentMode);
+        applyTheme(resolveTheme(currentMode));
+        updateIcon();
+        // Refresh charts with new theme colors
+        refreshChartsTheme();
+    }
+
+    function init() {
+        const saved = getCookie();
+        currentMode = (saved === 'light' || saved === 'dark' || saved === 'auto') ? saved : 'auto';
+        applyTheme(resolveTheme(currentMode));
+        updateIcon();
+
+        // Set Chart.js global text color to match current theme
+        if (typeof Chart !== 'undefined') {
+            Chart.defaults.color = getChartTextColor();
+        }
+
+        // Listen for OS theme changes (relevant when mode is 'auto')
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (currentMode === 'auto') {
+                applyTheme(resolveTheme('auto'));
+                refreshChartsTheme();
+            }
+        });
+
+        // Attach toggle button
+        const btn = document.getElementById('theme-toggle');
+        if (btn) btn.addEventListener('click', toggle);
+
+        // Enable smooth transitions after initial paint
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                document.body.classList.add('theme-transition');
+            });
+        });
+    }
+
+    return { init, isDark, getChartTextColor, getChartGridColor, toggle };
+})();
+
+// Refresh all Chart.js charts with current theme colors
+function refreshChartsTheme() {
+    const textColor = ThemeManager.getChartTextColor();
+    const gridColor = ThemeManager.getChartGridColor();
+
+    // Update Chart.js global default so newly rendered elements pick up the color
+    if (typeof Chart !== 'undefined') {
+        Chart.defaults.color = textColor;
+    }
+
+    [profitLossChart, portfolioDistributionChart, yearlyProfitLossChart].forEach(chart => {
+        if (!chart) return;
+        // Update scale colors
+        if (chart.options.scales) {
+            Object.values(chart.options.scales).forEach(scale => {
+                if (scale.ticks) scale.ticks.color = textColor;
+                if (scale.grid) scale.grid.color = gridColor;
+            });
+        }
+        // Update legend colors
+        if (chart.options.plugins?.legend?.labels) {
+            chart.options.plugins.legend.labels.color = textColor;
+        }
+        chart.update();
+    });
+}
+
 // CSRF token management
 let csrfToken = null;
 
@@ -657,9 +791,10 @@ function updateProfitLossChart(holdings) {
                 x: {
                     beginAtZero: true,
                     grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
+                        color: ThemeManager.getChartGridColor()
                     },
                     ticks: {
+                        color: ThemeManager.getChartTextColor(),
                         callback: function(value) {
                             return formatCurrency(value);
                         }
@@ -668,6 +803,9 @@ function updateProfitLossChart(holdings) {
                 y: {
                     grid: {
                         display: false
+                    },
+                    ticks: {
+                        color: ThemeManager.getChartTextColor()
                     }
                 }
             }
@@ -732,11 +870,13 @@ function updatePortfolioDistributionChart(holdings) {
                     position: 'right',
                     labels: {
                         padding: 15,
+                        color: ThemeManager.getChartTextColor(),
                         font: {
                             size: 12
                         },
                         generateLabels: function(chart) {
                             const data = chart.data;
+                            const textColor = ThemeManager.getChartTextColor();
                             if (data.labels.length && data.datasets.length) {
                                 return data.labels.map((label, i) => {
                                     const value = data.datasets[0].data[i];
@@ -744,6 +884,7 @@ function updatePortfolioDistributionChart(holdings) {
                                     const percentage = ((value / total) * 100).toFixed(1);
                                     return {
                                         text: `${label}: ${formatCurrency(value)} (${percentage}%)`,
+                                        fontColor: textColor,
                                         fillStyle: data.datasets[0].backgroundColor[i],
                                         strokeStyle: data.datasets[0].borderColor,
                                         lineWidth: data.datasets[0].borderWidth,
@@ -1122,7 +1263,8 @@ async function loadAvailableStocks() {
 }
 
 // Handle transaction form submission
-document.getElementById('transaction-form').addEventListener('submit', async (e) => {
+const transactionForm = document.getElementById('transaction-form');
+if (transactionForm) transactionForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     
     const type = document.getElementById('type').value;
@@ -1208,7 +1350,8 @@ document.getElementById('transaction-form').addEventListener('submit', async (e)
 });
 
 // Handle update prices button
-document.getElementById('update-prices-btn').addEventListener('click', async () => {
+const updatePricesBtn = document.getElementById('update-prices-btn');
+if (updatePricesBtn) updatePricesBtn.addEventListener('click', async () => {
     const btn = document.getElementById('update-prices-btn');
     const originalText = btn.textContent;
     
@@ -1373,9 +1516,10 @@ function updateYearlyProfitLossChart(yearlyData) {
                 y: {
                     beginAtZero: true,
                     grid: {
-                        color: 'rgba(0, 0, 0, 0.05)'
+                        color: ThemeManager.getChartGridColor()
                     },
                     ticks: {
+                        color: ThemeManager.getChartTextColor(),
                         callback: function(value) {
                             return formatCurrency(value);
                         }
@@ -1384,6 +1528,9 @@ function updateYearlyProfitLossChart(yearlyData) {
                 x: {
                     grid: {
                         display: false
+                    },
+                    ticks: {
+                        color: ThemeManager.getChartTextColor()
                     }
                 }
             }
@@ -1399,6 +1546,9 @@ function updateYearlyProfitLossChart(yearlyData) {
 
 // Set today's date as default in date picker and configure calendar
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize theme toggle
+    ThemeManager.init();
+
     const dateInput = document.getElementById('date');
     if (dateInput) {
         // Initialize Flatpickr with Czech locale and Monday as first day

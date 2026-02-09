@@ -4,14 +4,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Sledovač portfólia akcií{% endblock %}</title>
+    <script>
+        // Apply theme before any rendering to prevent FOUC (Flash of Unstyled Content)
+        (function() {
+            function getThemeCookie() {
+                var match = document.cookie.match(/(?:^|;\s*)theme=([^;]*)/);
+                return match ? match[1] : null;
+            }
+            var saved = getThemeCookie();
+            var mode = (saved === 'light' || saved === 'dark' || saved === 'auto') ? saved : 'auto';
+            var theme;
+            if (mode === 'light' || mode === 'dark') {
+                theme = mode;
+            } else {
+                // 'auto' or no cookie: follow OS preference
+                theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+            }
+            if (theme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+            }
+            // Store resolved mode for JS to pick up
+            window.__themeMode = mode;
+            // Pre-set toggle icon and label so it's visible before main.js loads
+            var icons = { light: '\u2600\uFE0F', dark: '\uD83C\uDF19', auto: '\uD83D\uDCBB' };
+            var labels = { light: 'Sv\u011Btl\u00FD', dark: 'Tmav\u00FD', auto: 'Auto' };
+            document.addEventListener('DOMContentLoaded', function() {
+                var iconEl = document.getElementById('theme-icon');
+                var labelEl = document.getElementById('theme-label');
+                if (iconEl && !iconEl.textContent) iconEl.textContent = icons[mode];
+                if (labelEl && !labelEl.textContent) labelEl.textContent = labels[mode];
+            });
+        })();
+    </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Sledovač portfólia akcií</h1>
-            <p class="subtitle">Sledování akcií s daňovou optimalizací</p>
+            <div class="header-content">
+                <h1>Sledovač portfólia akcií</h1>
+                <p class="subtitle">Sledování akcií s daňovou optimalizací</p>
+            </div>
+            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Přepnout motiv">
+                <span id="theme-icon" class="theme-toggle-icon"></span>
+                <span id="theme-label" class="theme-toggle-label"></span>
+            </button>
         </header>
         
         <main>
