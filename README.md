@@ -2,6 +2,10 @@
 
 Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou optimalizací podle českých zákonů.
 
+## Foto ukázky
+<img src="ukazka-transakce.png" alt="Ukázka - detail transakce" width="35%">  
+<img src="ukazka-piechart.png" alt="Ukázka - graf zisků a ztrát" width="35%">
+
 ## Funkce
 
 - **Sledování transakcí**: Přidávání nákupů a prodejů akcií
@@ -15,7 +19,6 @@ Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou o
 - **Vizualizace zisků/ztrát**: 
   - Přehled zisků a ztrát pro každou akcii v portfoliu
   - Přehled zisků/ztrát podle kalendářního roku pro prodané akcie
-- **Český kalendář**: Kalendářní výběr začíná pondělím (český standard)
 
 ## Požadavky
 
