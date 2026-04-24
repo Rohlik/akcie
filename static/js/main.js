@@ -236,28 +236,132 @@ function handleError(error, userMessage) {
     showMessage(userMessage || 'Došlo k chybě', 'error');
 }
 
+// Session-only sort state for Portfolio table
+let currentHoldings = [];
+let holdingsSortState = { key: null, direction: null };
+
+// Compare two values, pushing null/undefined to the end regardless of direction
+function compareHoldingValues(a, b, direction) {
+    const aIsNull = a === null || a === undefined;
+    const bIsNull = b === null || b === undefined;
+    if (aIsNull && bIsNull) return 0;
+    if (aIsNull) return 1;
+    if (bIsNull) return -1;
+    let cmp;
+    if (typeof a === 'string' && typeof b === 'string') {
+        cmp = a.localeCompare(b, 'cs');
+    } else {
+        cmp = a - b;
+    }
+    return direction === 'desc' ? -cmp : cmp;
+}
+
+function getSortedHoldings() {
+    const { key, direction } = holdingsSortState;
+    if (!key || !direction) return currentHoldings;
+    return [...currentHoldings].sort((a, b) => compareHoldingValues(a[key], b[key], direction));
+}
+
+function updateSortIndicators() {
+    document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
+        th.classList.remove('sorted-asc', 'sorted-desc');
+        if (th.dataset.sortKey === holdingsSortState.key && holdingsSortState.direction) {
+            th.classList.add(`sorted-${holdingsSortState.direction}`);
+        }
+    });
+}
+
+function renderHoldings() {
+    displayHoldings(getSortedHoldings());
+    updateSortIndicators();
+}
+
+function handleHoldingsSort(key) {
+    if (holdingsSortState.key === key) {
+        holdingsSortState.direction = holdingsSortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        holdingsSortState.key = key;
+        holdingsSortState.direction = 'asc';
+    }
+    renderHoldings();
+}
+
 // Load and display holdings
 async function loadHoldings() {
     setLoading('holdings-tbody', true);
     try {
         const response = await fetch('/api/holdings');
         const data = await response.json();
-        
+
         if (!response.ok) {
             const errorMsg = data.error?.message || data.error || 'Failed to load holdings';
             throw new Error(errorMsg);
         }
-        
-        displayHoldings(data.holdings);
+
+        currentHoldings = data.holdings;
+        renderHoldings();
         displayProfitLoss(data.holdings);
         updateProfitLossChart(data.holdings);
         updatePortfolioDistributionChart(data.holdings);
     } catch (error) {
         handleError(error, 'Chyba při načítání portfolia: ' + error.message);
-        document.getElementById('holdings-tbody').innerHTML = 
+        document.getElementById('holdings-tbody').innerHTML =
             '<tr><td colspan="7" class="loading">Chyba při načítání dat</td></tr>';
     } finally {
         setLoading('holdings-tbody', false);
+    }
+}
+
+// Load and display 20 most recent transactions (Obchody)
+async function loadRecentTransactions() {
+    const tbody = document.getElementById('recent-transactions-tbody');
+    if (!tbody) return;
+    try {
+        const response = await fetch('/api/transactions');
+        const data = await response.json();
+
+        if (!response.ok) {
+            const errorMsg = data.error?.message || data.error || 'Failed to load transactions';
+            throw new Error(errorMsg);
+        }
+
+        const transactions = data.transactions || [];
+        // API returns ascending by date/created_at; display newest first and cap at 20
+        const recent = [...transactions].reverse().slice(0, 20);
+
+        if (recent.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="loading">Žádné transakce</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = recent.map(tx => {
+            const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
+            const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
+            const fees = tx.fees || 0;
+            const totalValue = tx.type === 'buy'
+                ? (tx.price * tx.quantity) + fees
+                : (tx.price * tx.quantity) - fees;
+
+            const dateParts = tx.date.split('-');
+            const formattedDate = dateParts.length === 3
+                ? `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`
+                : tx.date;
+
+            return `
+                <tr>
+                    <td>${formattedDate}</td>
+                    <td><span class="${typeClass}">${typeText}</span></td>
+                    <td><strong>${tx.stock_name}</strong></td>
+                    <td>${formatCurrency(tx.price)}</td>
+                    <td>${formatNumber(tx.quantity)}</td>
+                    <td>${fees > 0 ? formatCurrency(fees) : '-'}</td>
+                    <td>${formatCurrency(totalValue)}</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Error loading recent transactions:', error);
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">Chyba při načítání transakcí</td></tr>';
     }
 }
 
@@ -599,7 +703,7 @@ window.saveTransaction = async function(transactionId, stockName, contentId) {
         await loadStockHistory(stockName, contentId);
         
         // Reload holdings and tax info
-        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss(), loadRecentTransactions()]);
         
     } catch (error) {
         handleError(error, 'Chyba při ukládání transakce: ' + error.message);
@@ -637,7 +741,7 @@ window.deleteTransaction = async function(transactionId, stockName, contentId) {
         await loadStockHistory(stockName, contentId);
         
         // Reload holdings and tax info
-        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss(), loadRecentTransactions()]);
         
     } catch (error) {
         handleError(error, 'Chyba při mazání transakce: ' + error.message);
@@ -1340,7 +1444,7 @@ if (transactionForm) transactionForm.addEventListener('submit', async (e) => {
         updateStockNameField();
         
         // Reload data
-        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss()]);
+        await Promise.all([loadHoldings(), loadTaxInfo(), loadYearlyProfitLoss(), loadRecentTransactions()]);
         
     } catch (error) {
         handleError(error, 'Chyba při přidávání transakce: ' + error.message);
@@ -1598,10 +1702,19 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStockNameField(); // Initialize
     }
     
+    // Wire up sortable headers on the Portfolio table
+    document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sortKey;
+            if (key) handleHoldingsSort(key);
+        });
+    });
+
     // Load initial data
     loadHoldings();
     loadTaxInfo();
     loadYearlyProfitLoss();
+    loadRecentTransactions();
     
     // Handle window resize to recalculate chart heights
     let resizeTimeout;

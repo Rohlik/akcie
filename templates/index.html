@@ -97,18 +97,43 @@
             <table id="holdings-table">
                 <thead>
                     <tr>
-                        <th style="width: 150px;">Akcie</th>
-                        <th>Množství</th>
-                        <th>Množství >3 roky</th>
-                        <th>Průměrná nákupní cena</th>
-                        <th>Aktuální cena</th>
-                        <th>Celková hodnota</th>
-                        <th>Zisk/Ztráta</th>
+                        <th class="sortable" data-sort-key="stock_name" style="width: 150px;">Akcie <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="quantity">Množství <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="three_year_quantity">Množství >3 roky <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="average_purchase_price">Průměrná nákupní cena <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="current_price">Aktuální cena <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="total_value">Celková hodnota <span class="sort-indicator"></span></th>
+                        <th class="sortable" data-sort-key="profit_loss">Zisk/Ztráta <span class="sort-indicator"></span></th>
                     </tr>
                 </thead>
                 <tbody id="holdings-tbody">
                     <tr>
                         <td colspan="7" class="loading">Načítání dat...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- Recent Transactions (Obchody) -->
+    <section class="card">
+        <h2>Obchody (20 posledních)</h2>
+        <div id="recent-transactions-container">
+            <table class="history-table" id="recent-transactions-table">
+                <thead>
+                    <tr>
+                        <th>Datum</th>
+                        <th>Typ</th>
+                        <th>Akcie</th>
+                        <th>Cena (CZK)</th>
+                        <th>Množství</th>
+                        <th>Poplatky (CZK)</th>
+                        <th>Celková hodnota</th>
+                    </tr>
+                </thead>
+                <tbody id="recent-transactions-tbody">
+                    <tr>
+                        <td colspan="7" class="loading">Načítání...</td>
                     </tr>
                 </tbody>
             </table>
