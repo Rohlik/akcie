@@ -137,21 +137,20 @@ def calculate_current_year_sales(transactions, current_year=None):
     
     year_start = datetime(current_year, 1, 1).date()
     year_end = datetime(current_year, 12, 31).date()
-    three_year_date = datetime.now().date() - timedelta(days=Config.THREE_YEAR_EXEMPTION_DAYS)
-    
+
     # Calculate holdings before each sale to determine if stock was held >3 years
     # Process transactions chronologically to track holdings
     holdings = {}  # stock_name -> list of (date, quantity) sorted by date
-    
+
     total_sales = 0
-    
+
     # Sort transactions by date
     sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-    
+
     for tx in sorted_transactions:
         stock_name = tx['stock_name']
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
-        
+
         if tx['type'] == 'buy':
             # Add purchase to holdings
             if stock_name not in holdings:
@@ -162,12 +161,12 @@ def calculate_current_year_sales(transactions, current_year=None):
             })
             # Sort by date (FIFO)
             holdings[stock_name].sort(key=lambda x: x['date'])
-            
+
         elif tx['type'] == 'sell':
             # Apply FIFO to determine which purchases were sold
             remaining_to_sell = tx['quantity']
             stock_holdings = holdings.get(stock_name, [])
-            
+
             # Track how many shares were held <3 years (to count only that portion)
             shares_held_less_than_3_years = 0
             
@@ -233,21 +232,20 @@ def calculate_current_year_sales_three_years(transactions, current_year=None):
     
     year_start = datetime(current_year, 1, 1).date()
     year_end = datetime(current_year, 12, 31).date()
-    three_year_date = datetime.now().date() - timedelta(days=Config.THREE_YEAR_EXEMPTION_DAYS)
-    
+
     # Calculate holdings before each sale to determine if stock was held >3 years
     # Process transactions chronologically to track holdings
     holdings = {}  # stock_name -> list of (date, quantity) sorted by date
-    
+
     total_sales = 0
-    
+
     # Sort transactions by date
     sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-    
+
     for tx in sorted_transactions:
         stock_name = tx['stock_name']
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
-        
+
         if tx['type'] == 'buy':
             # Add purchase to holdings
             if stock_name not in holdings:
@@ -258,12 +256,12 @@ def calculate_current_year_sales_three_years(transactions, current_year=None):
             })
             # Sort by date (FIFO)
             holdings[stock_name].sort(key=lambda x: x['date'])
-            
+
         elif tx['type'] == 'sell':
             # Apply FIFO to determine which purchases were sold
             remaining_to_sell = tx['quantity']
             stock_holdings = holdings.get(stock_name, [])
-            
+
             # Track how many shares were held >3 years (to count only that portion)
             shares_held_more_than_3_years = 0
             
@@ -317,6 +315,67 @@ def calculate_current_year_sales_three_years(transactions, current_year=None):
                     total_sales += proportional_value
     
     return total_sales
+
+def calculate_yearly_profit_loss(transactions):
+    """
+    Calculate profit/loss per calendar year for sold stocks using FIFO.
+    Cost basis includes buy fees; sale value subtracts sell fees.
+    Returns a list of dicts (year, total_sales, total_cost, profit_loss), sorted by year desc.
+    """
+    sorted_transactions = sorted(
+        transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d')
+    )
+
+    holdings = defaultdict(list)
+    yearly_stats = defaultdict(lambda: {'total_sales': 0.0, 'total_cost': 0.0})
+
+    for tx in sorted_transactions:
+        stock_name = tx['stock_name']
+        tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
+        tx_price = tx['price']
+        tx_quantity = tx['quantity']
+        tx_fees = tx.get('fees', 0.0) or 0.0
+
+        if tx['type'] == 'buy':
+            cost_basis = (tx_price * tx_quantity) + tx_fees
+            effective_price = cost_basis / tx_quantity if tx_quantity > 0 else tx_price
+            holdings[stock_name].append({
+                'date': tx_date,
+                'price': effective_price,
+                'quantity': tx_quantity,
+            })
+        elif tx['type'] == 'sell':
+            year = tx_date.year
+            net_sales_value = (tx_price * tx_quantity) - tx_fees
+            yearly_stats[year]['total_sales'] += net_sales_value
+
+            remaining_to_sell = tx_quantity
+            stock_holdings = holdings[stock_name]
+            stock_holdings.sort(key=lambda x: x['date'])
+
+            i = 0
+            while remaining_to_sell > 0 and i < len(stock_holdings):
+                holding = stock_holdings[i]
+                if holding['date'] <= tx_date:
+                    if holding['quantity'] <= remaining_to_sell:
+                        yearly_stats[year]['total_cost'] += holding['quantity'] * holding['price']
+                        remaining_to_sell -= holding['quantity']
+                        stock_holdings.pop(i)
+                        continue
+                    yearly_stats[year]['total_cost'] += remaining_to_sell * holding['price']
+                    holding['quantity'] -= remaining_to_sell
+                    remaining_to_sell = 0
+                i += 1
+
+    return [
+        {
+            'year': year,
+            'total_sales': yearly_stats[year]['total_sales'],
+            'total_cost': yearly_stats[year]['total_cost'],
+            'profit_loss': yearly_stats[year]['total_sales'] - yearly_stats[year]['total_cost'],
+        }
+        for year in sorted(yearly_stats.keys(), reverse=True)
+    ]
 
 def calculate_tax_free_capacity(sales_total):
     """

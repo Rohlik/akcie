@@ -101,6 +101,26 @@ def get_all_transactions():
         transactions = [dict(row) for row in cursor.fetchall()]
     return transactions
 
+def get_recent_transactions(limit, stock_name=None):
+    """Get most recent transactions, newest first, capped to `limit`."""
+    limit = max(1, int(limit))
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if stock_name:
+            cursor.execute('''
+                SELECT * FROM transactions
+                WHERE stock_name = ?
+                ORDER BY date DESC, created_at DESC
+                LIMIT ?
+            ''', (stock_name, limit))
+        else:
+            cursor.execute('''
+                SELECT * FROM transactions
+                ORDER BY date DESC, created_at DESC
+                LIMIT ?
+            ''', (limit,))
+        return [dict(row) for row in cursor.fetchall()]
+
 def get_transaction(transaction_id):
     """Get a single transaction by ID"""
     with get_db() as conn:

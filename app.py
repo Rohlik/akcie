@@ -3,7 +3,16 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf
 from datetime import datetime, timedelta
 import logging
 import os
-from models import init_db, add_transaction, get_all_transactions, get_all_stock_prices, get_transaction, update_transaction, delete_transaction
+from models import (
+    init_db,
+    add_transaction,
+    get_all_transactions,
+    get_recent_transactions,
+    get_all_stock_prices,
+    get_transaction,
+    update_transaction,
+    delete_transaction,
+)
 from tax_calculator import (
     calculate_holdings,
     get_three_year_holdings,
@@ -11,7 +20,8 @@ from tax_calculator import (
     calculate_current_year_sales_three_years,
     calculate_tax_free_capacity,
     aggregate_holdings_by_stock,
-    validate_no_oversell
+    validate_no_oversell,
+    calculate_yearly_profit_loss,
 )
 from yahoo_finance import update_all_prices, get_cached_price
 from config import Config
@@ -59,7 +69,6 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/transaction', methods=['POST'])
-@csrf.exempt  # CSRF handled via token in request header
 def add_transaction_api():
     """Add a new buy/sell transaction"""
     try:
@@ -207,7 +216,6 @@ def get_tax_info_api():
         return create_error_response('Failed to load tax information', 'LOAD_ERROR', 500)
 
 @app.route('/api/update-prices', methods=['POST'])
-@csrf.exempt
 def update_prices_api():
     """Fetch current prices from Yahoo Finance"""
     try:
@@ -240,24 +248,33 @@ def update_prices_api():
 
 @app.route('/api/transactions', methods=['GET'])
 def get_transactions_api():
-    """List all transactions, optionally filtered by stock"""
+    """List transactions. Optional filters: stock, limit (newest first when set)."""
     try:
         stock_name = request.args.get('stock')
         if stock_name:
             stock_name = sanitize_stock_name(stock_name)
-        
-        transactions = get_all_transactions()
-        
-        if stock_name:
-            transactions = [tx for tx in transactions if tx['stock_name'] == stock_name]
-        
+
+        limit_param = request.args.get('limit')
+        limit = None
+        if limit_param is not None:
+            try:
+                limit = max(1, min(int(limit_param), 1000))
+            except (TypeError, ValueError):
+                return create_error_response('Invalid limit', 'VALIDATION_ERROR', 400)
+
+        if limit is not None:
+            transactions = get_recent_transactions(limit, stock_name=stock_name)
+        else:
+            transactions = get_all_transactions()
+            if stock_name:
+                transactions = [tx for tx in transactions if tx['stock_name'] == stock_name]
+
         return jsonify({'transactions': transactions}), 200
     except Exception as e:
         logger.error(f"Error getting transactions: {e}", exc_info=True)
         return create_error_response('Failed to load transactions', 'LOAD_ERROR', 500)
 
 @app.route('/api/transaction/<int:transaction_id>', methods=['PUT'])
-@csrf.exempt
 def update_transaction_api(transaction_id):
     """Update an existing transaction"""
     try:
@@ -328,7 +345,6 @@ def update_transaction_api(transaction_id):
         return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
 
 @app.route('/api/transaction/<int:transaction_id>', methods=['DELETE'])
-@csrf.exempt
 def delete_transaction_api(transaction_id):
     """Delete a transaction"""
     try:
@@ -365,82 +381,8 @@ def delete_transaction_api(transaction_id):
 def get_yearly_profit_loss_api():
     """Calculate profit/loss per calendar year for sold stocks using FIFO"""
     try:
-        from collections import defaultdict
-        
-        transactions = get_all_transactions()
-        
-        # Sort transactions by date
-        sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-        
-        # Track holdings using FIFO
-        holdings = defaultdict(list)  # stock_name -> list of (date, price, quantity)
-        yearly_stats = defaultdict(lambda: {'total_sales': 0, 'total_cost': 0})
-        
-        for tx in sorted_transactions:
-            stock_name = tx['stock_name']
-            tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
-            tx_price = tx['price']
-            tx_quantity = tx['quantity']
-            tx_fees = tx.get('fees', 0.0) or 0.0
-            year = tx_date.year
-            
-            if tx['type'] == 'buy':
-                # Calculate effective price per share including fees
-                # Cost basis = (price * quantity) + fees
-                cost_basis = (tx_price * tx_quantity) + tx_fees
-                effective_price = cost_basis / tx_quantity if tx_quantity > 0 else tx_price
-                
-                # Add purchase to holdings with effective price (including fees)
-                holdings[stock_name].append({
-                    'date': tx_date,
-                    'price': effective_price,
-                    'quantity': tx_quantity
-                })
-            elif tx['type'] == 'sell':
-                # Calculate net sales value (revenue - fees)
-                # Net sale value = (price * quantity) - fees
-                net_sales_value = (tx_price * tx_quantity) - tx_fees
-                yearly_stats[year]['total_sales'] += net_sales_value
-                
-                # Apply FIFO to calculate cost basis
-                remaining_to_sell = tx_quantity
-                stock_holdings = holdings[stock_name]
-                stock_holdings.sort(key=lambda x: x['date'])
-                
-                i = 0
-                while remaining_to_sell > 0 and i < len(stock_holdings):
-                    holding = stock_holdings[i]
-                    purchase_date = holding['date']
-                    
-                    # Only use holdings purchased before or on sale date
-                    if purchase_date <= tx_date:
-                        if holding['quantity'] <= remaining_to_sell:
-                            # This purchase is fully sold
-                            yearly_stats[year]['total_cost'] += holding['quantity'] * holding['price']
-                            remaining_to_sell -= holding['quantity']
-                            stock_holdings.pop(i)
-                        else:
-                            # Partial sale of this purchase
-                            yearly_stats[year]['total_cost'] += remaining_to_sell * holding['price']
-                            holding['quantity'] -= remaining_to_sell
-                            remaining_to_sell = 0
-                    i += 1
-        
-        # Build response
-        yearly_data = []
-        for year in sorted(yearly_stats.keys(), reverse=True):
-            stats = yearly_stats[year]
-            profit_loss = stats['total_sales'] - stats['total_cost']
-            
-            yearly_data.append({
-                'year': year,
-                'total_sales': stats['total_sales'],
-                'total_cost': stats['total_cost'],
-                'profit_loss': profit_loss
-            })
-        
+        yearly_data = calculate_yearly_profit_loss(get_all_transactions())
         return jsonify({'yearly_data': yearly_data}), 200
-        
     except Exception as e:
         logger.error(f"Error calculating yearly profit/loss: {e}", exc_info=True)
         return create_error_response('Failed to calculate yearly profit/loss', 'CALCULATION_ERROR', 500)

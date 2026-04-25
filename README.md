@@ -110,13 +110,22 @@ akcie/
 ├── static/
 │   ├── css/
 │   │   └── style.css      # Styly
-│   └── js/
-│       └── main.js        # JavaScript
+│   └── js/                # ES moduly (načítané přes <script type="module">)
+│       ├── main.js        # Vstupní bod
+│       ├── api.js         # fetch + CSRF wrapper
+│       ├── charts.js      # Chart.js grafy + přepínání graf/tabulka
+│       ├── form.js        # Formulář "Přidat transakci"
+│       ├── format.js      # Formátování + sdílený renderTransactionRow
+│       ├── holdings.js    # Portfolio tabulka + řazení sloupců
+│       ├── tax.js         # Daňové info + roční zisk/ztráta
+│       ├── theme.js       # Světlý/tmavý/auto motiv
+│       ├── transactions.js# CRUD transakcí + Obchody
+│       └── ui.js          # Zprávy, chyby, loading
 ├── templates/
 │   ├── base.html          # Základní šablona
 │   └── index.html         # Hlavní dashboard
 └── instance/
-    └── portfolio.db       # SQLite databáze
+    └── portfolio.db       # SQLite databáze (vytvoří se automaticky)
 ```
 
 ## České daňové zákony

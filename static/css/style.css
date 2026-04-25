@@ -341,6 +341,42 @@ tbody tr:hover {
     background-color: var(--bg-color);
 }
 
+/* Sortable column headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+th.sortable:hover {
+    background-color: var(--border-color);
+}
+
+th.sortable .sort-indicator {
+    display: inline-block;
+    margin-left: 0.25rem;
+    font-size: 0.75rem;
+    opacity: 0.35;
+    transition: opacity 0.15s;
+}
+
+th.sortable .sort-indicator::before {
+    content: '\2195';
+}
+
+th.sortable.sorted-asc .sort-indicator,
+th.sortable.sorted-desc .sort-indicator {
+    opacity: 1;
+    color: var(--primary-color);
+}
+
+th.sortable.sorted-asc .sort-indicator::before {
+    content: '\25B2';
+}
+
+th.sortable.sorted-desc .sort-indicator::before {
+    content: '\25BC';
+}
+
 .three-year-holding {
     background-color: var(--three-year-bg) !important;
     font-weight: 600;

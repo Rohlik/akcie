@@ -11,6 +11,7 @@ venv/
 *.sqlite
 *.sqlite3
 
-# Cursor IDE
+# AI
 .cursor/
 .cursorignore
+.claude/settings.local.json
