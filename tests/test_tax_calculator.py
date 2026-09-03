@@ -11,10 +11,12 @@ import pytest
 from tax_calculator import (
     add_years,
     three_year_test_met,
+    consume_fifo,
     calculate_holdings,
     get_three_year_holdings,
     calculate_current_year_sales,
     calculate_current_year_sales_three_years,
+    calculate_yearly_profit_loss,
 )
 
 
@@ -70,6 +72,63 @@ def test_selling_everything_leaves_no_lots():
 def test_buy_fees_fold_into_the_effective_price():
     holdings = calculate_holdings([buy('X', '2020-01-01', 100, 10, fees=50)])
     assert holdings[0]['purchase_price'] == pytest.approx(105.0)
+
+
+# --- The shared FIFO primitive ------------------------------------------------
+
+def test_consume_fifo_reports_what_it_took_from_each_lot():
+    lots = [
+        {'date': date(2020, 1, 1), 'quantity': 10},
+        {'date': date(2021, 1, 1), 'quantity': 10},
+    ]
+    consumed = consume_fifo(lots, 15, date(2022, 1, 1))
+
+    assert [taken for _, taken in consumed] == [10, 5]
+    assert [lot['date'] for lot, _ in consumed] == [date(2020, 1, 1), date(2021, 1, 1)]
+    assert lots == [{'date': date(2021, 1, 1), 'quantity': 5}]
+
+
+def test_consume_fifo_skips_lots_acquired_after_the_sale():
+    lots = [
+        {'date': date(2025, 1, 1), 'quantity': 10},
+        {'date': date(2020, 1, 1), 'quantity': 4},
+    ]
+    consumed = consume_fifo(lots, 10, date(2022, 1, 1))
+
+    assert [taken for _, taken in consumed] == [4]
+    assert lots == [{'date': date(2025, 1, 1), 'quantity': 10}]
+
+
+def test_consume_fifo_ignores_quantity_it_cannot_satisfy():
+    lots = [{'date': date(2020, 1, 1), 'quantity': 3}]
+    assert [taken for _, taken in consume_fifo(lots, 99, date(2022, 1, 1))] == [3]
+    assert lots == []
+
+
+def test_holdings_do_not_depend_on_the_order_transactions_arrive_in():
+    txs = [
+        buy('X', '2020-01-01', 100, 10),
+        buy('X', '2021-01-01', 200, 10),
+        sell('X', '2022-01-01', 300, 15),
+    ]
+    assert calculate_holdings(txs) == calculate_holdings(list(reversed(txs)))
+
+
+def test_holdings_and_yearly_profit_loss_agree_on_shares_sold():
+    # The two read different accumulators over the same FIFO walk; if they ever
+    # disagree on how much was consumed, one of the copies has drifted.
+    txs = [
+        buy('X', '2019-01-01', 100, 10, fees=10),
+        buy('X', '2021-06-01', 150, 10, fees=10),
+        sell('X', '2023-01-01', 250, 12, fees=5),
+    ]
+    remaining = sum(h['quantity'] for h in calculate_holdings(txs))
+    assert remaining == 8
+
+    yearly = calculate_yearly_profit_loss(txs)
+    assert len(yearly) == 1
+    # 10 shares @101 + 2 shares @151 = 1312
+    assert yearly[0]['total_cost'] == pytest.approx(1312.0)
 
 
 # --- Calendar arithmetic ------------------------------------------------------

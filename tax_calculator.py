@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from collections import defaultdict
 from config import Config
 
@@ -19,6 +19,47 @@ def three_year_test_met(purchase_date, sale_date):
     split, which is what keeps the taxable and exempt totals from overlapping.
     """
     return sale_date > add_years(purchase_date, Config.THREE_YEAR_EXEMPTION_YEARS)
+
+def by_transaction_date(transactions):
+    """Chronological order, matching the ORDER BY the database applies."""
+    return sorted(transactions, key=lambda tx: (tx['date'], tx.get('created_at') or ''))
+
+def consume_fifo(lots, quantity, sale_date):
+    """
+    Take `quantity` shares from `lots` oldest-first, mutating `lots`: emptied
+    lots are removed and a partially sold lot has its quantity reduced.
+
+    Returns a list of (lot, taken) for each lot touched, where `taken` is the
+    share count drawn from it - read that, not lot['quantity'], which by then
+    holds the remainder. Lots acquired after `sale_date` are skipped rather
+    than sold, and any quantity left unsatisfied is silently ignored; callers
+    that care about overselling use validate_no_oversell().
+
+    Every FIFO consumer in this module goes through here. Holding the walk in
+    one place is what stops the callers' share counts from drifting apart.
+    """
+    lots.sort(key=lambda lot: lot['date'])
+
+    consumed = []
+    i = 0
+    while quantity > 0 and i < len(lots):
+        lot = lots[i]
+        if lot['date'] > sale_date:
+            i += 1
+            continue
+
+        if lot['quantity'] <= quantity:
+            taken = lot['quantity']
+            quantity -= taken
+            lots.pop(i)
+            # Don't increment i: the next lot moved into this position.
+        else:
+            taken = quantity
+            lot['quantity'] -= taken
+            quantity = 0
+        consumed.append((lot, taken))
+
+    return consumed
 
 def validate_no_oversell(transactions):
     """
@@ -60,8 +101,8 @@ def calculate_holdings(transactions):
     Returns a list of holdings with purchase date, price (including fees), and remaining quantity.
     """
     holdings = defaultdict(list)  # stock_name -> list of (date, price, quantity)
-    
-    for tx in transactions:
+
+    for tx in by_transaction_date(transactions):
         stock_name = tx['stock_name']
         tx_type = tx['type']
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
@@ -83,26 +124,9 @@ def calculate_holdings(transactions):
                 'quantity': tx_quantity
             })
         elif tx_type == 'sell':
-            # Remove from holdings using FIFO (oldest first)
-            remaining_to_sell = tx_quantity
-            stock_holdings = holdings[stock_name]
-            
-            # Sort by date to ensure FIFO
-            stock_holdings.sort(key=lambda x: x['date'])
-            
-            i = 0
-            while remaining_to_sell > 0 and i < len(stock_holdings):
-                if stock_holdings[i]['quantity'] <= remaining_to_sell:
-                    # This purchase is fully sold
-                    remaining_to_sell -= stock_holdings[i]['quantity']
-                    stock_holdings.pop(i)
-                    # Don't increment i: the next lot moved into this position
-                    continue
-                # Partial sale of this purchase
-                stock_holdings[i]['quantity'] -= remaining_to_sell
-                remaining_to_sell = 0
-                i += 1
-    
+            consume_fifo(holdings[stock_name], tx_quantity, tx_date)
+
+
     # Convert to list format for easier processing
     result = []
     for stock_name, stock_holdings in holdings.items():
@@ -142,187 +166,77 @@ def get_three_year_holdings(holdings, current_date=None):
     
     return dict(aggregated)
 
-def calculate_current_year_sales(transactions, current_year=None):
+def _split_year_sales(transactions, year):
     """
-    Sum sell transaction values in the current tax year (net of fees).
-    EXCLUDES sales of stocks held >3 years (they are tax-free regardless of amount).
-    Tax year is January 1 to December 31.
-    For sell transactions: revenue = (price * quantity) - fees
+    Net proceeds of `year`'s sales, split into (taxable, exempt) by the 3-year
+    time test, applied per lot.
+
+    A single sale can straddle the test - older lots exempt, newer ones not -
+    so the proceeds are apportioned by share count. Both halves come out of one
+    pass so they always partition the year's sales exactly: no sale can be
+    counted in both buckets or in neither.
     """
-    if current_year is None:
-        current_year = datetime.now().year
-    
-    year_start = datetime(current_year, 1, 1).date()
-    year_end = datetime(current_year, 12, 31).date()
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
 
-    # Calculate holdings before each sale to determine if stock was held >3 years
-    # Process transactions chronologically to track holdings
-    holdings = {}  # stock_name -> list of (date, quantity) sorted by date
+    lots_by_stock = defaultdict(list)
+    taxable = 0
+    exempt = 0
 
-    total_sales = 0
-
-    # Sort transactions by date
-    sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-
-    for tx in sorted_transactions:
+    for tx in by_transaction_date(transactions):
         stock_name = tx['stock_name']
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
 
         if tx['type'] == 'buy':
-            # Add purchase to holdings
-            if stock_name not in holdings:
-                holdings[stock_name] = []
-            holdings[stock_name].append({
+            lots_by_stock[stock_name].append({
                 'date': tx_date,
-                'quantity': tx['quantity']
+                'quantity': tx['quantity'],
             })
-            # Sort by date (FIFO)
-            holdings[stock_name].sort(key=lambda x: x['date'])
+            continue
 
-        elif tx['type'] == 'sell':
-            # Apply FIFO to determine which purchases were sold
-            remaining_to_sell = tx['quantity']
-            stock_holdings = holdings.get(stock_name, [])
+        if tx['type'] != 'sell':
+            continue
 
-            # Track how many shares were held <3 years (to count only that portion)
-            shares_held_less_than_3_years = 0
-            
-            i = 0
-            while remaining_to_sell > 0 and i < len(stock_holdings):
-                holding = stock_holdings[i]
-                purchase_date = holding['date']
-                
-                # Only consider holdings purchased before or on sale date
-                if purchase_date <= tx_date:
-                    # Calculate how many shares from this purchase are being sold
-                    shares_from_this_purchase = min(holding['quantity'], remaining_to_sell)
+        consumed = consume_fifo(lots_by_stock[stock_name], tx['quantity'], tx_date)
 
-                    if not three_year_test_met(purchase_date, tx_date):
-                        # This portion failed the time test, count it
-                        shares_held_less_than_3_years += shares_from_this_purchase
-                    
-                    if holding['quantity'] <= remaining_to_sell:
-                        # This purchase is fully sold
-                        remaining_to_sell -= holding['quantity']
-                        stock_holdings.pop(i)
-                        # Don't increment i because next element moved to current position
-                    else:
-                        # Partial sale of this purchase
-                        holding['quantity'] -= remaining_to_sell
-                        remaining_to_sell = 0
-                        i += 1
-                else:
-                    # Skip holdings purchased after sale date
-                    i += 1
-            
-            # Update holdings dictionary
-            holdings[stock_name] = stock_holdings
-            
-            # Check if this sale is in current tax year
-            if year_start <= tx_date <= year_end:
-                # Only count the portion of sales that were held <3 years
-                if shares_held_less_than_3_years > 0:
-                    tx_fees = tx.get('fees', 0.0) or 0.0
-                    total_shares_sold = tx['quantity']
-                    # Calculate total net sale value (revenue - fees)
-                    total_net_sale_value = (tx['price'] * total_shares_sold) - tx_fees
-                    # Calculate proportional value: only count the portion held <3 years
-                    proportional_value = (shares_held_less_than_3_years / total_shares_sold) * total_net_sale_value
-                    total_sales += proportional_value
-                # Note: If shares_held_less_than_3_years is 0, all sold stocks were held >3 years
-                # and should not count against the 100k limit
-    
-    return total_sales
+        # The FIFO walk has to run for every sale to keep the lot pool correct,
+        # but only sales inside the selected year contribute to the totals.
+        if not (year_start <= tx_date <= year_end):
+            continue
+
+        shares_exempt = sum(
+            taken for lot, taken in consumed if three_year_test_met(lot['date'], tx_date)
+        )
+        shares_taxable = sum(
+            taken for lot, taken in consumed if not three_year_test_met(lot['date'], tx_date)
+        )
+
+        total_shares_sold = tx['quantity']
+        tx_fees = tx.get('fees', 0.0) or 0.0
+        net_value = (tx['price'] * total_shares_sold) - tx_fees
+
+        if shares_taxable > 0:
+            taxable += (shares_taxable / total_shares_sold) * net_value
+        if shares_exempt > 0:
+            exempt += (shares_exempt / total_shares_sold) * net_value
+
+    return taxable, exempt
+
+def calculate_current_year_sales(transactions, current_year=None):
+    """
+    Net proceeds of the year's sales that count against the 100k limit, i.e.
+    those that failed the 3-year time test.
+    """
+    year = current_year if current_year is not None else datetime.now().year
+    return _split_year_sales(transactions, year)[0]
 
 def calculate_current_year_sales_three_years(transactions, current_year=None):
     """
-    Sum sell transaction values in the current tax year for stocks held >3 years (net of fees).
-    These sales are always tax-free and don't count against the 100k limit.
-    Tax year is January 1 to December 31.
-    For sell transactions: revenue = (price * quantity) - fees
+    Net proceeds of the year's sales that passed the 3-year time test. These
+    are exempt regardless of amount and never count against the 100k limit.
     """
-    if current_year is None:
-        current_year = datetime.now().year
-    
-    year_start = datetime(current_year, 1, 1).date()
-    year_end = datetime(current_year, 12, 31).date()
-
-    # Calculate holdings before each sale to determine if stock was held >3 years
-    # Process transactions chronologically to track holdings
-    holdings = {}  # stock_name -> list of (date, quantity) sorted by date
-
-    total_sales = 0
-
-    # Sort transactions by date
-    sorted_transactions = sorted(transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
-
-    for tx in sorted_transactions:
-        stock_name = tx['stock_name']
-        tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
-
-        if tx['type'] == 'buy':
-            # Add purchase to holdings
-            if stock_name not in holdings:
-                holdings[stock_name] = []
-            holdings[stock_name].append({
-                'date': tx_date,
-                'quantity': tx['quantity']
-            })
-            # Sort by date (FIFO)
-            holdings[stock_name].sort(key=lambda x: x['date'])
-
-        elif tx['type'] == 'sell':
-            # Apply FIFO to determine which purchases were sold
-            remaining_to_sell = tx['quantity']
-            stock_holdings = holdings.get(stock_name, [])
-
-            # Track how many shares were held >3 years (to count only that portion)
-            shares_held_more_than_3_years = 0
-            
-            i = 0
-            while remaining_to_sell > 0 and i < len(stock_holdings):
-                holding = stock_holdings[i]
-                purchase_date = holding['date']
-                
-                # Only consider holdings purchased before or on sale date
-                if purchase_date <= tx_date:
-                    # Calculate how many shares from this purchase are being sold
-                    shares_from_this_purchase = min(holding['quantity'], remaining_to_sell)
-
-                    if three_year_test_met(purchase_date, tx_date):
-                        # This portion passed the time test, count it
-                        shares_held_more_than_3_years += shares_from_this_purchase
-                    
-                    if holding['quantity'] <= remaining_to_sell:
-                        # This purchase is fully sold
-                        remaining_to_sell -= holding['quantity']
-                        stock_holdings.pop(i)
-                        # Don't increment i because next element moved to current position
-                    else:
-                        # Partial sale of this purchase
-                        holding['quantity'] -= remaining_to_sell
-                        remaining_to_sell = 0
-                        i += 1
-                else:
-                    # Skip holdings purchased after sale date
-                    i += 1
-            
-            # Update holdings dictionary
-            holdings[stock_name] = stock_holdings
-            
-            # Check if this sale is in current tax year
-            if year_start <= tx_date <= year_end:
-                # Only count the portion of sales that were held >3 years
-                if shares_held_more_than_3_years > 0:
-                    tx_fees = tx.get('fees', 0.0) or 0.0
-                    total_shares_sold = tx['quantity']
-                    # Calculate total net sale value (revenue - fees)
-                    total_net_sale_value = (tx['price'] * total_shares_sold) - tx_fees
-                    # Calculate proportional value: only count the portion held >3 years
-                    proportional_value = (shares_held_more_than_3_years / total_shares_sold) * total_net_sale_value
-                    total_sales += proportional_value
-    
-    return total_sales
+    year = current_year if current_year is not None else datetime.now().year
+    return _split_year_sales(transactions, year)[1]
 
 def calculate_yearly_profit_loss(transactions):
     """
@@ -330,14 +244,10 @@ def calculate_yearly_profit_loss(transactions):
     Cost basis includes buy fees; sale value subtracts sell fees.
     Returns a list of dicts (year, total_sales, total_cost, profit_loss), sorted by year desc.
     """
-    sorted_transactions = sorted(
-        transactions, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d')
-    )
-
     holdings = defaultdict(list)
     yearly_stats = defaultdict(lambda: {'total_sales': 0.0, 'total_cost': 0.0})
 
-    for tx in sorted_transactions:
+    for tx in by_transaction_date(transactions):
         stock_name = tx['stock_name']
         tx_date = datetime.strptime(tx['date'], '%Y-%m-%d').date()
         tx_price = tx['price']
@@ -357,23 +267,8 @@ def calculate_yearly_profit_loss(transactions):
             net_sales_value = (tx_price * tx_quantity) - tx_fees
             yearly_stats[year]['total_sales'] += net_sales_value
 
-            remaining_to_sell = tx_quantity
-            stock_holdings = holdings[stock_name]
-            stock_holdings.sort(key=lambda x: x['date'])
-
-            i = 0
-            while remaining_to_sell > 0 and i < len(stock_holdings):
-                holding = stock_holdings[i]
-                if holding['date'] <= tx_date:
-                    if holding['quantity'] <= remaining_to_sell:
-                        yearly_stats[year]['total_cost'] += holding['quantity'] * holding['price']
-                        remaining_to_sell -= holding['quantity']
-                        stock_holdings.pop(i)
-                        continue
-                    yearly_stats[year]['total_cost'] += remaining_to_sell * holding['price']
-                    holding['quantity'] -= remaining_to_sell
-                    remaining_to_sell = 0
-                i += 1
+            for lot, taken in consume_fifo(holdings[stock_name], tx_quantity, tx_date):
+                yearly_stats[year]['total_cost'] += taken * lot['price']
 
     return [
         {
