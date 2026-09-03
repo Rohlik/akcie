@@ -1,6 +1,7 @@
 """
 Utility functions for input validation, sanitization, and error handling
 """
+import math
 import re
 from datetime import datetime, date
 from typing import Dict, Any, Optional, Tuple
@@ -66,6 +67,9 @@ def validate_date(date_str: str, allow_future: bool = False) -> Tuple[bool, Opti
 
 def validate_price(price: float) -> Tuple[bool, Optional[str]]:
     """Validate price value"""
+    # NaN passes every comparison below, so it has to be rejected up front
+    if not math.isfinite(price):
+        return False, "Price must be a finite number"
     if price <= 0:
         return False, "Price must be greater than 0"
     if price > Config.MAX_PRICE:
@@ -82,6 +86,8 @@ def validate_quantity(quantity: int) -> Tuple[bool, Optional[str]]:
 
 def validate_fees(fees: float) -> Tuple[bool, Optional[str]]:
     """Validate fees value"""
+    if not math.isfinite(fees):
+        return False, "Fees must be a finite number"
     if fees < 0:
         return False, "Fees cannot be negative"
     if fees > Config.MAX_FEES:

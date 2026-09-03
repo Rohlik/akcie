@@ -1,6 +1,24 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import defaultdict
 from config import Config
+
+def add_years(d, years):
+    """Date `years` calendar years after `d`. 29 February maps to 28 February."""
+    try:
+        return d.replace(year=d.year + years)
+    except ValueError:
+        return d.replace(year=d.year + years, month=2, day=28)
+
+def three_year_test_met(purchase_date, sale_date):
+    """
+    True when the holding period from `purchase_date` to `sale_date` passes the
+    3-year time test and the sale is therefore exempt.
+
+    The period must *exceed* three calendar years, so a sale on the anniversary
+    itself is still taxable. This single predicate decides both sides of the
+    split, which is what keeps the taxable and exempt totals from overlapping.
+    """
+    return sale_date > add_years(purchase_date, Config.THREE_YEAR_EXEMPTION_YEARS)
 
 def validate_no_oversell(transactions):
     """
@@ -78,10 +96,11 @@ def calculate_holdings(transactions):
                     # This purchase is fully sold
                     remaining_to_sell -= stock_holdings[i]['quantity']
                     stock_holdings.pop(i)
-                else:
-                    # Partial sale of this purchase
-                    stock_holdings[i]['quantity'] -= remaining_to_sell
-                    remaining_to_sell = 0
+                    # Don't increment i: the next lot moved into this position
+                    continue
+                # Partial sale of this purchase
+                stock_holdings[i]['quantity'] -= remaining_to_sell
+                remaining_to_sell = 0
                 i += 1
     
     # Convert to list format for easier processing
@@ -105,15 +124,13 @@ def get_three_year_holdings(holdings, current_date=None):
     if current_date is None:
         current_date = datetime.now().date()
     
-    three_year_date = current_date - timedelta(days=Config.THREE_YEAR_EXEMPTION_DAYS)
-    
     three_year_holdings = []
     for holding in holdings:
         purchase_date = holding['purchase_date']
         if isinstance(purchase_date, str):
             purchase_date = datetime.strptime(purchase_date, '%Y-%m-%d').date()
-        
-        if purchase_date <= three_year_date:
+
+        if three_year_test_met(purchase_date, current_date):
             three_year_holdings.append(holding)
     
     # Aggregate by stock name
@@ -177,14 +194,11 @@ def calculate_current_year_sales(transactions, current_year=None):
                 
                 # Only consider holdings purchased before or on sale date
                 if purchase_date <= tx_date:
-                    # Check if this purchase was held <3 years at time of sale
-                    days_held = (tx_date - purchase_date).days
-                    
                     # Calculate how many shares from this purchase are being sold
                     shares_from_this_purchase = min(holding['quantity'], remaining_to_sell)
-                    
-                    if days_held <= Config.THREE_YEAR_EXEMPTION_DAYS:
-                        # This portion was held <3 years, count it
+
+                    if not three_year_test_met(purchase_date, tx_date):
+                        # This portion failed the time test, count it
                         shares_held_less_than_3_years += shares_from_this_purchase
                     
                     if holding['quantity'] <= remaining_to_sell:
@@ -272,17 +286,11 @@ def calculate_current_year_sales_three_years(transactions, current_year=None):
                 
                 # Only consider holdings purchased before or on sale date
                 if purchase_date <= tx_date:
-                    # Check if this purchase was held >3 years at time of sale
-                    # Calculate the date 3 years before the sale date
-                    three_year_before_sale = tx_date - timedelta(days=Config.THREE_YEAR_EXEMPTION_DAYS)
-                    days_held = (tx_date - purchase_date).days
-                    
                     # Calculate how many shares from this purchase are being sold
                     shares_from_this_purchase = min(holding['quantity'], remaining_to_sell)
-                    
-                    # Check if purchase was made before the 3-year cutoff date
-                    if purchase_date <= three_year_before_sale:
-                        # This portion was held >3 years, count it
+
+                    if three_year_test_met(purchase_date, tx_date):
+                        # This portion passed the time test, count it
                         shares_held_more_than_3_years += shares_from_this_purchase
                     
                     if holding['quantity'] <= remaining_to_sell:

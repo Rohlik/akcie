@@ -12,7 +12,9 @@ class Config:
     
     # Tax Configuration
     TAX_FREE_LIMIT = 100000  # 100k CZK
-    THREE_YEAR_EXEMPTION_DAYS = 3 * 365  # 3 years in days
+    # Time test is measured in calendar years, not days: 3*365 is one day short of
+    # the anniversary whenever the window contains a leap day (the usual case).
+    THREE_YEAR_EXEMPTION_YEARS = 3
     
     # Input Validation
     MAX_STOCK_NAME_LENGTH = 40
