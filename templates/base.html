@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Sledovač portfólia akcií{% endblock %}</title>
+    <title>{% block title %}Moje portfolio{% endblock %}</title>
     <script>
         // Apply theme before any rendering to prevent FOUC (Flash of Unstyled Content)
         (function() {
@@ -38,6 +38,9 @@
     </script>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon/favicon-chart.png') }}" sizes="64x64">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon/favicon-chart.png') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 </head>
@@ -45,22 +48,34 @@
     <div class="container">
         <header>
             <div class="header-content">
-                <h1>Sledovač portfólia akcií</h1>
-                <p class="subtitle">Sledování akcií s daňovou optimalizací</p>
+                <h1>Moje portfolio</h1>
             </div>
-            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Přepnout motiv">
-                <span id="theme-icon" class="theme-toggle-icon"></span>
+            <button class="theme-toggle" id="theme-toggle" type="button">
+                <span id="theme-icon" class="theme-toggle-icon" aria-hidden="true"></span>
                 <span id="theme-label" class="theme-toggle-label"></span>
             </button>
         </header>
+
+        <!-- The 100k CZK annual exemption: the number the whole app answers. -->
+        <section class="allowance" aria-labelledby="allowance-label">
+            <div class="allowance-head">
+                <span class="allowance-label" id="allowance-label">
+                    Zbývající daňově osvobozená kapacita pro rok <span id="allowance-year">-</span>
+                </span>
+                <span class="allowance-of" id="allowance-of"></span>
+            </div>
+            <div class="allowance-figure" id="allowance-figure">-</div>
+            <div class="allowance-bar" id="allowance-bar"
+                 role="progressbar" aria-labelledby="allowance-label"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <i style="width: 0%"></i>
+            </div>
+        </section>
 
         <main>
             {% block content %}{% endblock %}
         </main>
 
-        <footer>
-            <p>&copy; 2026 Rohlik</p>
-        </footer>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>

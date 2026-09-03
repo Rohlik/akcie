@@ -12,6 +12,18 @@ export function formatCurrency(value) {
     return currencyFmt.format(value);
 }
 
+// Profit/loss columns always carry an explicit sign, matching formatPercentage.
+export function formatSignedCurrency(value) {
+    if (value === null || value === undefined) return '-';
+    return `${value >= 0 ? '+' : ''}${currencyFmt.format(value)}`;
+}
+
+// Percent change against a cost basis, guarding a zero or missing basis.
+export function percentOfCost(value, totalCost) {
+    if (!totalCost || totalCost <= 0) return 0;
+    return (value / totalCost) * 100;
+}
+
 export function formatNumber(value) {
     if (value === null || value === undefined) return '-';
     return numberFmt.format(value);
@@ -87,7 +99,7 @@ export function escapeHtml(value) {
 // inline edit/delete actions.
 export function renderTransactionRow(tx, options = {}) {
     const { showStock = true, showActions = false } = options;
-    const typeClass = tx.type === 'buy' ? 'profit' : 'loss';
+    const typeClass = tx.type === 'buy' ? 'tx-type' : 'tx-type tx-type-sell';
     const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
     const fees = tx.fees || 0;
     const totalValue = transactionTotalValue(tx);

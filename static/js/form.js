@@ -21,20 +21,21 @@ function updateStockNameField() {
     const type = currentType();
     const textInput = document.getElementById('stock_name');
     const selectInput = document.getElementById('stock_name_select');
+    const textLabel = document.getElementById('stock_name_label');
+    const selectLabel = document.getElementById('stock_name_select_label');
     if (!textInput || !selectInput) return;
 
-    if (type === 'sell') {
-        textInput.style.display = 'none';
-        textInput.removeAttribute('required');
-        selectInput.style.display = 'block';
-        selectInput.setAttribute('required', 'required');
-        loadAvailableStocks();
-    } else {
-        textInput.style.display = 'block';
-        textInput.setAttribute('required', 'required');
-        selectInput.style.display = 'none';
-        selectInput.removeAttribute('required');
-    }
+    // Each control keeps its own <label for>, so whichever one is showing is
+    // the one that is labelled.
+    const selling = type === 'sell';
+    textInput.hidden = selling;
+    textInput.toggleAttribute('required', !selling);
+    selectInput.hidden = !selling;
+    selectInput.toggleAttribute('required', selling);
+    if (textLabel) textLabel.hidden = selling;
+    if (selectLabel) selectLabel.hidden = !selling;
+
+    if (selling) loadAvailableStocks();
 }
 
 async function loadAvailableStocks() {

@@ -45,13 +45,13 @@ async function loadStockHistory(stockName, contentEl) {
             <table class="history-table">
                 <thead>
                     <tr>
-                        <th>Datum</th>
-                        <th>Typ</th>
-                        <th>Cena (CZK)</th>
-                        <th>Množství</th>
-                        <th>Poplatky (CZK)</th>
-                        <th>Celková hodnota</th>
-                        <th style="width: 80px;">Akce</th>
+                        <th scope="col">Datum</th>
+                        <th scope="col">Typ</th>
+                        <th scope="col" class="num">Cena (CZK)</th>
+                        <th scope="col" class="num">Množství</th>
+                        <th scope="col" class="num">Poplatky (CZK)</th>
+                        <th scope="col" class="num">Celková hodnota</th>
+                        <th scope="col" class="col-actions">Akce</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -62,7 +62,54 @@ async function loadStockHistory(stockName, contentEl) {
     } catch (error) {
         console.error('Error loading stock history:', error);
         contentEl.classList.remove('loading');
-        contentEl.innerHTML = '<p style="color: red;">Chyba při načítání historie.</p>';
+        contentEl.innerHTML = '<p class="error-text">Historii se nepodařilo načíst. Zkuste to znovu.</p>';
+    }
+}
+
+// --- Ticker rename -----------------------------------------------------------
+
+async function postRename(oldName, newName, confirmMerge) {
+    const response = await csrfFetch('/api/stock/rename', {
+        method: 'POST',
+        body: JSON.stringify({ old_name: oldName, new_name: newName, confirm_merge: confirmMerge }),
+    });
+    return { response, data: await readJson(response) };
+}
+
+async function renameStock(oldName) {
+    const input = prompt(`Přejmenovat ticker "${oldName}" na:`, oldName);
+    if (input === null) return;
+
+    const newName = input.trim();
+    if (!newName || newName === oldName) return;
+
+    try {
+        let { response, data } = await postRename(oldName, newName, false);
+
+        // The server rejects a merge it was not told to expect: fusing two lot
+        // streams cannot be undone by renaming back.
+        if (response.status === 409 && data?.error?.code === 'MERGE_REQUIRES_CONFIRMATION') {
+            const proceed = confirm(
+                `${extractErrorMessage(data, '')}\n\n` +
+                'Sloučení je nevratné - zpětné přejmenování pozice znovu nerozdělí. Pokračovat?'
+            );
+            if (!proceed) return;
+            ({ response, data } = await postRename(oldName, newName, true));
+        }
+
+        if (!response.ok) {
+            throw new Error(extractErrorMessage(data, 'Failed to rename ticker'));
+        }
+
+        showMessage(
+            data.merged
+                ? `${oldName} sloučeno do ${data.new_name} (${data.renamed} transakcí). Aktualizujte ceny.`
+                : `${oldName} přejmenováno na ${data.new_name} (${data.renamed} transakcí). Aktualizujte ceny.`,
+            'success'
+        );
+        await reloadDataAfterMutation();
+    } catch (error) {
+        handleError(error, 'Chyba při přejmenování tickeru: ' + error.message);
     }
 }
 
@@ -70,17 +117,19 @@ function toggleHistory(historyId, stockName) {
     const historyRow = document.getElementById(historyId);
     if (!historyRow) return;
     const visible = historyRow.style.display !== 'none';
+    const toggle = document.querySelector(`[data-action="toggle-history"][aria-controls="${historyId}"]`);
+    const icon = toggle?.querySelector('.expand-icon');
 
     if (visible) {
         historyRow.style.display = 'none';
-        const icon = historyRow.previousElementSibling?.querySelector('.expand-icon');
         if (icon) icon.textContent = '▼';
+        toggle?.setAttribute('aria-expanded', 'false');
         return;
     }
 
     historyRow.style.display = 'table-row';
-    const icon = historyRow.previousElementSibling?.querySelector('.expand-icon');
     if (icon) icon.textContent = '▲';
+    toggle?.setAttribute('aria-expanded', 'true');
 
     const contentEl = historyRow.querySelector('.history-content > div');
     if (contentEl && contentEl.textContent.trim() === 'Načítání...') {
@@ -99,24 +148,29 @@ function convertRowToEditMode(row, transaction) {
 
     const displayDate = formatIsoDateCs(transaction.date);
 
+    const typeClass = transaction.type === 'buy' ? 'tx-type' : 'tx-type tx-type-sell';
     row.innerHTML = `
         <td>
-            <input type="text" class="edit-date" value="${displayDate}" placeholder="DD.MM.YYYY" style="width: 100px;">
+            <input type="text" class="edit-date" value="${displayDate}" placeholder="DD.MM.YYYY"
+                   aria-label="Datum">
         </td>
-        <td><span class="${transaction.type === 'buy' ? 'profit' : 'loss'}">${transaction.type === 'buy' ? 'Nákup' : 'Prodej'}</span></td>
+        <td><span class="${typeClass}">${transaction.type === 'buy' ? 'Nákup' : 'Prodej'}</span></td>
         <td>
-            <input type="number" class="edit-price" value="${transaction.price}" step="0.01" min="0" style="width: 100px;">
+            <input type="number" class="edit-price" value="${transaction.price}" step="0.01" min="0"
+                   aria-label="Cena v CZK">
         </td>
         <td>
-            <input type="number" class="edit-quantity" value="${transaction.quantity}" min="1" style="width: 80px;">
+            <input type="number" class="edit-quantity" value="${transaction.quantity}" min="1"
+                   aria-label="Množství">
         </td>
         <td>
-            <input type="number" class="edit-fees" value="${transaction.fees || 0}" step="0.01" min="0" style="width: 100px;">
+            <input type="number" class="edit-fees" value="${transaction.fees || 0}" step="0.01" min="0"
+                   aria-label="Poplatky v CZK">
         </td>
         <td class="tx-total">-</td>
         <td>
-            <button class="btn-save" data-action="save-tx" title="Uložit">✓</button>
-            <button class="btn-cancel" data-action="cancel-tx" title="Zrušit">✕</button>
+            <button type="button" class="btn-save" data-action="save-tx" title="Uložit" aria-label="Uložit">✓</button>
+            <button type="button" class="btn-cancel" data-action="cancel-tx" title="Zrušit" aria-label="Zrušit">✕</button>
         </td>
     `;
 
@@ -260,6 +314,10 @@ export function initTransactionInteractions() {
         const action = actionEl.dataset.action;
         if (action === 'toggle-history') {
             toggleHistory(actionEl.dataset.historyId, actionEl.dataset.stock);
+            return;
+        }
+        if (action === 'rename-stock') {
+            await renameStock(actionEl.dataset.stock);
             return;
         }
 

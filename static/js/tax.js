@@ -1,10 +1,42 @@
 // Tax info card + yearly profit/loss table. Chart rendering is delegated to
 // charts.js.
 
-import { formatCurrency, formatPercentage, escapeHtml } from './format.js';
+import {
+    formatCurrency, formatSignedCurrency, formatPercentage,
+    percentOfCost, escapeHtml,
+} from './format.js';
 import { readJson, extractErrorMessage } from './api.js';
 import { handleError } from './ui.js';
 import { updateYearlyProfitLossChart } from './charts.js';
+
+// The hero meter above the dashboard: how much of the annual exemption is
+// left. Everything else on the page is bookkeeping around this number.
+function updateAllowanceMeter(data, fallbackYear) {
+    const figure = document.getElementById('allowance-figure');
+    if (!figure) return;
+
+    const limit = data.tax_free_limit || 0;
+    const remaining = data.remaining_tax_free_capacity ?? 0;
+    const used = Math.max(0, limit - remaining);
+    const usedPct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+
+    figure.textContent = formatCurrency(remaining);
+
+    const yearEl = document.getElementById('allowance-year');
+    if (yearEl) yearEl.textContent = data.selected_year || fallbackYear;
+
+    const ofEl = document.getElementById('allowance-of');
+    if (ofEl) ofEl.textContent = `vyčerpáno ${formatCurrency(used)} ze ${formatCurrency(limit)}`;
+
+    const bar = document.getElementById('allowance-bar');
+    if (bar) {
+        const fill = bar.querySelector('i');
+        if (fill) fill.style.width = `${usedPct}%`;
+        bar.classList.toggle('is-full', remaining <= 0);
+        bar.setAttribute('aria-valuenow', String(Math.round(usedPct)));
+        bar.setAttribute('aria-valuetext', `Zbývá ${formatCurrency(remaining)} ze ${formatCurrency(limit)}`);
+    }
+}
 
 export async function loadTaxInfo() {
     if (!document.getElementById('tax-info-content')) return;
@@ -42,14 +74,10 @@ export async function loadTaxInfo() {
         const salesValue = data.current_year_sales || 0;
         if (salesEl) {
             salesEl.textContent = formatCurrency(salesValue);
-            if (salesValue > 0) {
-                salesEl.style.color = 'var(--danger-color)';
-                salesEl.style.fontWeight = '600';
-            } else {
-                salesEl.style.color = '';
-                salesEl.style.fontWeight = '';
-            }
+            salesEl.classList.toggle('loss', salesValue > 0);
         }
+
+        updateAllowanceMeter(data, selectedYear);
 
         const label1 = document.getElementById('tax-selected-year-label');
         const label2 = document.getElementById('tax-selected-year-label-2');
@@ -76,14 +104,14 @@ function displayYearlyProfitLoss(yearlyData) {
     const sorted = [...yearlyData].sort((a, b) => b.year - a.year);
     tbody.innerHTML = sorted.map(yr => {
         const pl = yr.profit_loss || 0;
-        const pct = yr.total_cost > 0 ? (pl / yr.total_cost) * 100 : 0;
+        const pct = percentOfCost(pl, yr.total_cost);
         const cls = pl >= 0 ? 'profit' : 'loss';
         return `
             <tr>
                 <td><strong>${escapeHtml(yr.year)}</strong></td>
                 <td>${formatCurrency(yr.total_sales)}</td>
                 <td>${formatCurrency(yr.total_cost)}</td>
-                <td class="${cls}">${formatCurrency(pl)}</td>
+                <td class="${cls}">${formatSignedCurrency(pl)}</td>
                 <td class="${cls}">${formatPercentage(pct)}</td>
             </tr>
         `;

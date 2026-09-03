@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
 from datetime import datetime, timedelta
 import logging
 import os
@@ -12,6 +12,9 @@ from models import (
     get_transaction,
     update_transaction,
     delete_transaction,
+    count_transactions_for_stock,
+    rename_stock,
+    get_ticker_renames,
 )
 from tax_calculator import (
     calculate_holdings,
@@ -57,6 +60,14 @@ Config.validate_secret_key()
 # Initialize database on startup
 with app.app_context():
     init_db()
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    """
+    Flask-WTF returns an HTML page by default, which the frontend cannot parse.
+    Answer in JSON so it can recognise an expired token and fetch a fresh one.
+    """
+    return create_error_response('CSRF token missing or expired', 'CSRF_ERROR', 400)
 
 @app.route('/api/csrf-token', methods=['GET'])
 def get_csrf_token():
@@ -136,8 +147,9 @@ def get_holdings_api():
             current_price = price_dict.get(stock_name)
             three_year_data = three_year.get(stock_name, {'quantity': 0, 'total_value': 0})
             
-            total_value = current_price * data['quantity'] if current_price else None
-            profit_loss = (current_price - data['average_purchase_price']) * data['quantity'] if current_price else None
+            has_price = current_price is not None
+            total_value = current_price * data['quantity'] if has_price else None
+            profit_loss = (current_price - data['average_purchase_price']) * data['quantity'] if has_price else None
             
             holdings_list.append({
                 'stock_name': stock_name,
@@ -196,7 +208,7 @@ def get_tax_info_api():
         three_year_total_value = 0
         for stock_name, data in three_year.items():
             current_price = price_dict.get(stock_name)
-            if current_price:
+            if current_price is not None:
                 # Use quantity from three_year data
                 three_year_total_value += current_price * data['quantity']
         
@@ -376,6 +388,66 @@ def delete_transaction_api(transaction_id):
     except Exception as e:
         logger.error(f"Error deleting transaction {transaction_id}: {e}", exc_info=True)
         return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
+
+@app.route('/api/stock/rename', methods=['POST'])
+def rename_stock_api():
+    """
+    Rename a ticker across all transactions (e.g. CZG.PR -> COLT.PR).
+
+    Merging into a ticker that already has transactions is irreversible - the
+    two FIFO lot streams fuse and renaming back will not split them - so it
+    requires an explicit confirm_merge flag.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return create_error_response('No data provided', 'NO_DATA', 400)
+
+        old_name = sanitize_stock_name(str(data.get('old_name', '')).strip())
+        new_name = sanitize_stock_name(str(data.get('new_name', '')).strip())
+
+        if not old_name or not new_name:
+            return create_error_response('Both old_name and new_name are required', 'VALIDATION_ERROR', 400)
+        if old_name == new_name:
+            return create_error_response('New ticker is identical to the old one', 'VALIDATION_ERROR', 400)
+
+        if count_transactions_for_stock(old_name) == 0:
+            return create_error_response(f'No transactions found for {old_name}', 'NOT_FOUND', 404)
+
+        merges_into_existing = count_transactions_for_stock(new_name) > 0
+        if merges_into_existing and not data.get('confirm_merge'):
+            return create_error_response(
+                f'Ticker {new_name} již existuje. Přejmenováním se obě pozice trvale sloučí.',
+                'MERGE_REQUIRES_CONFIRMATION',
+                409
+            )
+
+        renamed = rename_stock(old_name, new_name)
+
+        # Cheap belt-and-braces: merging two valid streams cannot introduce an
+        # oversell, but the tax math depends on it, so verify rather than assume.
+        ok, msg = validate_no_oversell(get_all_transactions())
+        if not ok:
+            logger.error(f"Rename {old_name} -> {new_name} produced an invalid ledger: {msg}")
+
+        logger.info(f"Ticker renamed: {old_name} -> {new_name} ({renamed} transactions, merged={merges_into_existing})")
+        return create_success_response(
+            {'renamed': renamed, 'merged': merges_into_existing, 'new_name': new_name},
+            f'{old_name} přejmenováno na {new_name}'
+        )
+
+    except Exception as e:
+        logger.error(f"Error renaming stock: {e}", exc_info=True)
+        return create_error_response('Internal server error', 'INTERNAL_ERROR', 500)
+
+@app.route('/api/stock/renames', methods=['GET'])
+def get_ticker_renames_api():
+    """Ticker rename history, newest first."""
+    try:
+        return jsonify({'renames': get_ticker_renames()}), 200
+    except Exception as e:
+        logger.error(f"Error loading rename history: {e}", exc_info=True)
+        return create_error_response('Failed to load rename history', 'LOAD_ERROR', 500)
 
 @app.route('/api/yearly-profit-loss', methods=['GET'])
 def get_yearly_profit_loss_api():

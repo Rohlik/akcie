@@ -14,7 +14,7 @@ export async function getCsrfToken() {
     return csrfToken;
 }
 
-export async function csrfFetch(url, options = {}) {
+async function sendWithToken(url, options) {
     const token = await getCsrfToken();
     const headers = { ...(options.headers || {}) };
     if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
@@ -22,6 +22,24 @@ export async function csrfFetch(url, options = {}) {
     }
     if (token) headers['X-CSRFToken'] = token;
     return fetch(url, { ...options, headers });
+}
+
+export async function csrfFetch(url, options = {}) {
+    let response = await sendWithToken(url, options);
+
+    // Tokens expire after an hour, which a dashboard left open will hit. On a
+    // rejection, drop the cached token and retry once with a fresh one rather
+    // than failing every write until the page is reloaded.
+    if (response.status === 400) {
+        const clone = response.clone();
+        const data = await clone.json().catch(() => null);
+        if (data?.error?.code === 'CSRF_ERROR') {
+            csrfToken = null;
+            response = await sendWithToken(url, options);
+        }
+    }
+
+    return response;
 }
 
 export async function readJson(response) {

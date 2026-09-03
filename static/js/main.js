@@ -4,11 +4,12 @@ import { initTheme } from './theme.js';
 import { initHoldingsSort, loadHoldings } from './holdings.js';
 import { initTransactionInteractions, loadRecentTransactions } from './transactions.js';
 import { loadTaxInfo, loadYearlyProfitLoss } from './tax.js';
-import { initChartToggles, resizeProfitLossChartForWindow } from './charts.js';
+import { initChartToggles, resizeProfitLossChartForWindow, applyChartDefaults } from './charts.js';
 import { initTransactionForm, initUpdatePricesButton } from './form.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
+    applyChartDefaults();
     initChartToggles();
     initHoldingsSort();
     initTransactionInteractions();

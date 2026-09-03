@@ -15,9 +15,10 @@
             </div>
             
             <div class="form-group">
-                <label for="stock_name">Název akcie:</label>
+                <label for="stock_name" id="stock_name_label">Název akcie:</label>
+                <label for="stock_name_select" id="stock_name_select_label" hidden>Název akcie:</label>
                 <input type="text" id="stock_name" name="stock_name" placeholder="např. TABAK.PR" required>
-                <select id="stock_name_select" name="stock_name_select" style="display: none;" required>
+                <select id="stock_name_select" name="stock_name_select" hidden required>
                     <option value="">Vyberte akcii...</option>
                 </select>
             </div>
@@ -42,7 +43,7 @@
             <div class="form-group">
                 <label for="fees">Poplatky (CZK):</label>
                 <input type="number" id="fees" name="fees" step="0.01" min="0" value="0" placeholder="0.00">
-                <small style="color: var(--text-light); font-size: 0.875rem;">Poplatky burze a další související náklady</small>
+                <small class="field-hint">Poplatky burze a další související náklady</small>
             </div>
             
             <button type="submit" id="submit-btn" class="btn btn-primary">Přidat transakci</button>
@@ -60,8 +61,8 @@
                         <option value="">Načítání...</option>
                     </select>
                 </div>
-                <a href="/api/export/tax-report" class="btn btn-secondary" style="margin-right: 0.5rem;">Exportovat daňovou zprávu (CSV)</a>
-                <a href="/api/export/transactions" class="btn btn-secondary">Exportovat transakce (CSV)</a>
+                <a href="/api/export/tax-report" class="btn btn-secondary">Daňová zpráva (CSV)</a>
+                <a href="/api/export/transactions" class="btn btn-secondary">Transakce (CSV)</a>
             </div>
         </div>
         <div id="tax-info-content">
@@ -81,9 +82,10 @@
                 <span class="label">Hodnota akcií držených >3 roky:</span>
                 <span class="value highlight-green" id="three-year-value">-</span>
             </div>
-            <div class="info-item" style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
-                <span>Poznámka: Prodeje akcií držených déle než 3 roky jsou vždy daňově osvobozené a nepočítají se do limitu 100 000 Kč.</span>
-            </div>
+            <p class="card-note">
+                Prodeje akcií, které prošly tříletým časovým testem, jsou daňově
+                osvobozené a nepočítají se do ročního limitu.
+            </p>
         </div>
     </section>
     
@@ -95,15 +97,25 @@
         </div>
         <div id="holdings-container">
             <table id="holdings-table">
+                <caption class="visually-hidden">Aktuální pozice v portfoliu</caption>
+                <colgroup>
+                    <col style="width: 18%">
+                    <col style="width: 11%">
+                    <col style="width: 13%">
+                    <col style="width: 16%">
+                    <col style="width: 14%">
+                    <col style="width: 14%">
+                    <col style="width: 14%">
+                </colgroup>
                 <thead>
                     <tr>
-                        <th class="sortable" data-sort-key="stock_name" style="width: 150px;">Akcie <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="quantity">Množství <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="three_year_quantity">Množství >3 roky <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="average_purchase_price">Průměrná nákupní cena <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="current_price">Aktuální cena <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="total_value">Celková hodnota <span class="sort-indicator"></span></th>
-                        <th class="sortable" data-sort-key="profit_loss">Zisk/Ztráta <span class="sort-indicator"></span></th>
+                        <th scope="col" class="sortable" data-sort-key="stock_name" aria-sort="none"><button type="button" class="sort-btn">Akcie <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="quantity" aria-sort="none"><button type="button" class="sort-btn">Množství <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="three_year_quantity" aria-sort="none"><button type="button" class="sort-btn">Po časovém testu <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="average_purchase_price" aria-sort="none"><button type="button" class="sort-btn">Prům. nákupní cena <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="current_price" aria-sort="none"><button type="button" class="sort-btn">Aktuální cena <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="total_value" aria-sort="none"><button type="button" class="sort-btn">Celková hodnota <span class="sort-indicator" aria-hidden="true"></span></button></th>
+                        <th scope="col" class="sortable" data-sort-key="profit_loss" aria-sort="none"><button type="button" class="sort-btn">Zisk/Ztráta <span class="sort-indicator" aria-hidden="true"></span></button></th>
                     </tr>
                 </thead>
                 <tbody id="holdings-tbody">
@@ -117,18 +129,22 @@
 
     <!-- Recent Transactions (Obchody) -->
     <section class="card">
-        <h2>Obchody (20 posledních)</h2>
+        <div class="card-header">
+            <h2>Poslední obchody</h2>
+            <span class="card-meta">20 nejnovějších</span>
+        </div>
         <div id="recent-transactions-container">
             <table class="history-table" id="recent-transactions-table">
+                <caption class="visually-hidden">Dvacet nejnovějších transakcí</caption>
                 <thead>
                     <tr>
-                        <th>Datum</th>
-                        <th>Typ</th>
-                        <th>Akcie</th>
-                        <th>Cena (CZK)</th>
-                        <th>Množství</th>
-                        <th>Poplatky (CZK)</th>
-                        <th>Celková hodnota</th>
+                        <th scope="col">Datum</th>
+                        <th scope="col">Typ</th>
+                        <th scope="col">Akcie</th>
+                        <th scope="col" class="num">Cena (CZK)</th>
+                        <th scope="col" class="num">Množství</th>
+                        <th scope="col" class="num">Poplatky (CZK)</th>
+                        <th scope="col" class="num">Celková hodnota</th>
                     </tr>
                 </thead>
                 <tbody id="recent-transactions-tbody">
@@ -161,11 +177,11 @@
                 <table id="profit-loss-table">
                     <thead>
                         <tr>
-                            <th>Akcie</th>
-                            <th>Celková hodnota</th>
-                            <th>Celkové náklady</th>
-                            <th>Zisk/Ztráta</th>
-                            <th>Zisk/Ztráta %</th>
+                            <th scope="col">Akcie</th>
+                            <th scope="col">Celková hodnota</th>
+                            <th scope="col">Celkové náklady</th>
+                            <th scope="col">Zisk/Ztráta</th>
+                            <th scope="col">Zisk/Ztráta %</th>
                         </tr>
                     </thead>
                     <tbody id="profit-loss-tbody">
@@ -181,10 +197,13 @@
     <!-- Portfolio Distribution Chart -->
     <section class="card">
         <h2>Rozložení portfolia</h2>
-        <div class="chart-container-wrapper">
-            <div class="chart-container">
-                <canvas id="portfolio-distribution-chart"></canvas>
+        <div class="distribution-layout">
+            <div class="chart-container-wrapper">
+                <div class="chart-container">
+                    <canvas id="portfolio-distribution-chart"></canvas>
+                </div>
             </div>
+            <div id="portfolio-distribution-legend" class="distribution-legend"></div>
         </div>
     </section>
     
@@ -205,11 +224,11 @@
                 <table id="yearly-profit-loss-table">
                     <thead>
                         <tr>
-                            <th>Rok</th>
-                            <th>Celkové prodeje</th>
-                            <th>Celkové náklady</th>
-                            <th>Zisk/Ztráta</th>
-                            <th>Zisk/Ztráta %</th>
+                            <th scope="col">Rok</th>
+                            <th scope="col">Celkové prodeje</th>
+                            <th scope="col">Celkové náklady</th>
+                            <th scope="col">Zisk/Ztráta</th>
+                            <th scope="col">Zisk/Ztráta %</th>
                         </tr>
                     </thead>
                     <tbody id="yearly-profit-loss-tbody">

@@ -58,6 +58,18 @@ def init_db():
             )
         ''')
         
+        # Audit trail for ticker renames (e.g. CZG.PR -> COLT.PR). The rename
+        # itself rewrites transactions.stock_name, so this is the only record
+        # that the old symbol was ever used.
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ticker_renames (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                old_name TEXT NOT NULL,
+                new_name TEXT NOT NULL,
+                renamed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # Create database version table for migrations
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS schema_version (
@@ -65,17 +77,20 @@ def init_db():
                 applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
+
         # Check current version
         cursor.execute('SELECT MAX(version) as version FROM schema_version')
         result = cursor.fetchone()
         current_version = result['version'] if result and result['version'] else 0
-        
+
         # Apply migrations if needed
         if current_version < 1:
             # Migration 1: fees column (already handled above)
             cursor.execute('INSERT INTO schema_version (version) VALUES (1)')
-        
+        if current_version < 2:
+            # Migration 2: ticker_renames table (created above)
+            cursor.execute('INSERT INTO schema_version (version) VALUES (2)')
+
         conn.commit()
 
 def add_transaction(transaction_type, stock_name, date, price, quantity, fees=0.0):
@@ -152,6 +167,49 @@ def delete_transaction(transaction_id):
         conn.commit()
         success = cursor.rowcount > 0
     return success
+
+def count_transactions_for_stock(stock_name):
+    """Number of transactions recorded under a ticker."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) AS n FROM transactions WHERE stock_name = ?', (stock_name,))
+        return cursor.fetchone()['n']
+
+def rename_stock(old_name, new_name):
+    """
+    Rewrite a ticker across every transaction, in one transaction.
+
+    A ticker change is a relabeling, not a corporate action, so the rows keep
+    their dates and the 3-year time test keeps running from the original
+    purchases. Returns the number of rows rewritten.
+    """
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE transactions SET stock_name = ? WHERE stock_name = ?',
+            (new_name, old_name)
+        )
+        renamed = cursor.rowcount
+        # stock_prices is keyed by stock_name, so the old row cannot simply be
+        # renamed onto an existing new one. Drop both and let the next refresh
+        # refetch under the new symbol.
+        cursor.execute(
+            'DELETE FROM stock_prices WHERE stock_name IN (?, ?)',
+            (old_name, new_name)
+        )
+        cursor.execute(
+            'INSERT INTO ticker_renames (old_name, new_name) VALUES (?, ?)',
+            (old_name, new_name)
+        )
+        conn.commit()
+    return renamed
+
+def get_ticker_renames():
+    """Rename history, newest first."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM ticker_renames ORDER BY renamed_at DESC, id DESC')
+        return [dict(row) for row in cursor.fetchall()]
 
 def update_stock_price(stock_name, current_price, status='available'):
     """Update or insert stock price"""

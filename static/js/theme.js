@@ -55,12 +55,31 @@ export function isDark() {
     return resolveTheme(currentMode) === 'dark';
 }
 
+// Chart colors come from the same CSS tokens as the rest of the page, so the
+// palette has one source of truth.
+export function cssToken(name, fallback = '') {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+}
+
 export function getChartTextColor() {
-    return isDark() ? '#cbd5e1' : '#374151';
+    return cssToken('--ink-muted', isDark() ? '#9aa4b0' : '#5c6672');
 }
 
 export function getChartGridColor() {
-    return isDark() ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.05)';
+    return cssToken('--chart-grid', isDark() ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)');
+}
+
+export function getGainColor() {
+    return cssToken('--gain', '#0b6e63');
+}
+
+export function getLossColor() {
+    return cssToken('--loss', '#b42318');
+}
+
+export function getSurfaceColor() {
+    return cssToken('--surface', '#fdfdfb');
 }
 
 export function toggleTheme() {

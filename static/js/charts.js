@@ -2,12 +2,35 @@
 // in one place. Modules that need to re-render a chart import the updater
 // directly and pass in fresh data.
 
-import { formatCurrency } from './format.js';
-import { getChartTextColor, getChartGridColor } from './theme.js';
+import { formatCurrency, percentOfCost, escapeHtml } from './format.js';
+import {
+    getChartTextColor, getChartGridColor,
+    getGainColor, getLossColor, getSurfaceColor,
+} from './theme.js';
 
 let profitLossChart = null;
 let portfolioDistributionChart = null;
 let yearlyProfitLossChart = null;
+
+// Single-hue ramp ordered by position size, so the color itself encodes
+// "biggest holding" instead of assigning arbitrary hues per ticker.
+const DISTRIBUTION_RAMP = [
+    '#0b3d3a', '#125a53', '#1c776c', '#2a9385',
+    '#4aae9d', '#77c5b6', '#a6dbd0', '#d2ece6',
+];
+
+function signedColors(values) {
+    const gain = getGainColor();
+    const loss = getLossColor();
+    return values.map(v => (v >= 0 ? gain : loss));
+}
+
+export function applyChartDefaults() {
+    if (typeof Chart === 'undefined') return;
+    Chart.defaults.font.family = "'IBM Plex Sans', system-ui, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = getChartTextColor();
+}
 
 export function updateProfitLossChart(holdings) {
     const ctx = document.getElementById('profit-loss-chart');
@@ -28,7 +51,6 @@ export function updateProfitLossChart(holdings) {
     const sortedHoldings = [...validHoldings].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
     const labels = sortedHoldings.map(h => h.stock_name);
     const data = sortedHoldings.map(h => h.profit_loss || 0);
-    const colors = data.map(v => v >= 0 ? '#10b981' : '#ef4444');
 
     const config = {
         type: 'bar',
@@ -37,10 +59,9 @@ export function updateProfitLossChart(holdings) {
             datasets: [{
                 label: 'Zisk/Ztráta (CZK)',
                 data,
-                backgroundColor: colors,
-                borderColor: colors.map(c => c === '#10b981' ? '#059669' : '#dc2626'),
-                borderWidth: 2,
-                borderRadius: 8,
+                backgroundColor: signedColors(data),
+                borderWidth: 0,
+                borderRadius: 2,
                 borderSkipped: false,
             }],
         },
@@ -54,9 +75,7 @@ export function updateProfitLossChart(holdings) {
                     label(context) {
                         const value = context.parsed.x;
                         const holding = sortedHoldings[context.dataIndex];
-                        const percent = holding.total_cost > 0
-                            ? ((value / holding.total_cost) * 100).toFixed(2)
-                            : '0.00';
+                        const percent = percentOfCost(value, holding.total_cost).toFixed(2);
                         return [`Zisk/Ztráta: ${formatCurrency(value)}`, `Procento: ${percent}%`];
                     },
                 }),
@@ -92,6 +111,8 @@ export function updatePortfolioDistributionChart(holdings) {
             portfolioDistributionChart.destroy();
             portfolioDistributionChart = null;
         }
+        const legend = document.getElementById('portfolio-distribution-legend');
+        if (legend) legend.innerHTML = '';
         ctx.parentElement.innerHTML = '<p class="loading">Žádná data pro zobrazení</p>';
         return;
     }
@@ -100,11 +121,12 @@ export function updatePortfolioDistributionChart(holdings) {
     const labels = sorted.map(h => h.stock_name);
     const values = sorted.map(h => h.total_value || 0);
 
-    const palette = [
-        '#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-        '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1',
-    ];
-    const backgroundColors = values.map((_, i) => palette[i % palette.length]);
+    const backgroundColors = values.map((_, i) => DISTRIBUTION_RAMP[i % DISTRIBUTION_RAMP.length]);
+
+    // The full "ticker: 1 234,00 Kč (23.4%)" strings used to be Chart.js legend
+    // entries and got clipped at the canvas edge. They render as real HTML
+    // beside the canvas instead, which also makes them selectable.
+    renderDistributionLegend(sorted, backgroundColors);
 
     const config = {
         type: 'doughnut',
@@ -113,7 +135,7 @@ export function updatePortfolioDistributionChart(holdings) {
             datasets: [{
                 data: values,
                 backgroundColor: backgroundColors,
-                borderColor: '#ffffff',
+                borderColor: getSurfaceColor(),
                 borderWidth: 2,
             }],
         },
@@ -121,35 +143,7 @@ export function updatePortfolioDistributionChart(holdings) {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: {
-                    position: 'right',
-                    labels: {
-                        padding: 15,
-                        color: getChartTextColor(),
-                        font: { size: 12 },
-                        generateLabels(chart) {
-                            const d = chart.data;
-                            const textColor = getChartTextColor();
-                            if (d.labels.length && d.datasets.length) {
-                                return d.labels.map((label, i) => {
-                                    const value = d.datasets[0].data[i];
-                                    const total = d.datasets[0].data.reduce((a, b) => a + b, 0);
-                                    const pct = ((value / total) * 100).toFixed(1);
-                                    return {
-                                        text: `${label}: ${formatCurrency(value)} (${pct}%)`,
-                                        fontColor: textColor,
-                                        fillStyle: d.datasets[0].backgroundColor[i],
-                                        strokeStyle: d.datasets[0].borderColor,
-                                        lineWidth: d.datasets[0].borderWidth,
-                                        hidden: false,
-                                        index: i,
-                                    };
-                                });
-                            }
-                            return [];
-                        },
-                    },
-                },
+                legend: { display: false },
                 tooltip: tooltipOptions({
                     label(context) {
                         const label = context.label || '';
@@ -183,7 +177,6 @@ export function updateYearlyProfitLossChart(yearlyData) {
     const sorted = [...yearlyData].sort((a, b) => b.year - a.year);
     const labels = sorted.map(d => d.year.toString());
     const data = sorted.map(d => d.profit_loss || 0);
-    const colors = data.map(v => v >= 0 ? '#10b981' : '#ef4444');
 
     const config = {
         type: 'bar',
@@ -192,10 +185,9 @@ export function updateYearlyProfitLossChart(yearlyData) {
             datasets: [{
                 label: 'Zisk/Ztráta (CZK)',
                 data,
-                backgroundColor: colors,
-                borderColor: colors.map(c => c === '#10b981' ? '#059669' : '#dc2626'),
-                borderWidth: 2,
-                borderRadius: 8,
+                backgroundColor: signedColors(data),
+                borderWidth: 0,
+                borderRadius: 2,
                 borderSkipped: false,
             }],
         },
@@ -208,9 +200,7 @@ export function updateYearlyProfitLossChart(yearlyData) {
                     label(context) {
                         const value = context.parsed.y;
                         const yearData = sorted[context.dataIndex];
-                        const pct = yearData.total_cost > 0
-                            ? ((value / yearData.total_cost) * 100).toFixed(2)
-                            : '0.00';
+                        const pct = percentOfCost(value, yearData.total_cost).toFixed(2);
                         return [
                             `Zisk/Ztráta: ${formatCurrency(value)}`,
                             `Prodeje: ${formatCurrency(yearData.total_sales)}`,
@@ -241,12 +231,35 @@ export function updateYearlyProfitLossChart(yearlyData) {
     yearlyProfitLossChart = new Chart(ctx, config);
 }
 
+function renderDistributionLegend(sorted, colors) {
+    const list = document.getElementById('portfolio-distribution-legend');
+    if (!list) return;
+
+    const total = sorted.reduce((sum, h) => sum + (h.total_value || 0), 0);
+    list.innerHTML = sorted.map((h, i) => {
+        const value = h.total_value || 0;
+        const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+        return `
+            <div class="legend-row">
+                <span class="legend-swatch" style="background:${colors[i]}" aria-hidden="true"></span>
+                <span class="legend-name">${escapeHtml(h.stock_name)}</span>
+                <span class="legend-value num">${formatCurrency(value)}</span>
+                <span class="legend-pct num">${pct}%</span>
+            </div>
+        `;
+    }).join('');
+}
+
 function tooltipOptions(callbacks) {
     return {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        padding: 12,
-        titleFont: { size: 14, weight: 'bold' },
-        bodyFont: { size: 13 },
+        backgroundColor: getSurfaceColor(),
+        titleColor: getChartTextColor(),
+        bodyColor: getChartTextColor(),
+        borderColor: getChartGridColor(),
+        borderWidth: 1,
+        padding: 10,
+        titleFont: { size: 13, weight: '600' },
+        bodyFont: { size: 12 },
         callbacks,
     };
 }
@@ -269,7 +282,8 @@ export function resizeProfitLossChartForWindow() {
     profitLossChart.resize();
 }
 
-// Keep chart colors in sync with the current theme.
+// Keep chart colors in sync with the current theme. Datasets are repainted
+// too, not just the axes - gain/loss and the doughnut border are theme tokens.
 document.addEventListener('themechange', () => {
     const textColor = getChartTextColor();
     const gridColor = getChartGridColor();
@@ -286,6 +300,21 @@ document.addEventListener('themechange', () => {
         if (chart.options.plugins?.legend?.labels) {
             chart.options.plugins.legend.labels.color = textColor;
         }
+        if (chart.options.plugins?.tooltip) {
+            Object.assign(chart.options.plugins.tooltip, {
+                backgroundColor: getSurfaceColor(),
+                titleColor: textColor,
+                bodyColor: textColor,
+                borderColor: gridColor,
+            });
+        }
+        chart.data.datasets.forEach(dataset => {
+            if (chart === portfolioDistributionChart) {
+                dataset.borderColor = getSurfaceColor();
+            } else {
+                dataset.backgroundColor = signedColors(dataset.data);
+            }
+        });
         chart.update();
     });
 });

@@ -1,7 +1,10 @@
 // Portfolio ("Holdings") table: loads data, renders rows, supports
 // session-only column sort, and triggers chart refreshes.
 
-import { formatCurrency, formatNumber, escapeHtml } from './format.js';
+import {
+    formatCurrency, formatSignedCurrency, formatNumber, formatPercentage,
+    percentOfCost, escapeHtml,
+} from './format.js';
 import { setLoading, handleError } from './ui.js';
 import { extractErrorMessage, readJson } from './api.js';
 import { updateProfitLossChart, updatePortfolioDistributionChart } from './charts.js';
@@ -33,8 +36,12 @@ function getSortedHoldings() {
 function updateSortIndicators() {
     document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
         th.classList.remove('sorted-asc', 'sorted-desc');
-        if (th.dataset.sortKey === sortState.key && sortState.direction) {
+        const active = th.dataset.sortKey === sortState.key && sortState.direction;
+        if (active) {
             th.classList.add(`sorted-${sortState.direction}`);
+            th.setAttribute('aria-sort', sortState.direction === 'asc' ? 'ascending' : 'descending');
+        } else {
+            th.setAttribute('aria-sort', 'none');
         }
     });
 }
@@ -60,28 +67,35 @@ function displayHoldings(holdings) {
         return `
             <tr class="${rowClass} holding-row" data-stock="${safeStock}" id="holding-row-${index}">
                 <td>
-                    <strong class="stock-name-clickable" data-action="toggle-history" data-history-id="${historyId}" data-stock="${safeStock}" style="cursor: pointer; user-select: none;">
-                        ${safeStock} <span class="expand-icon">▼</span>
-                    </strong>
+                    <span class="stock-cell">
+                        <button type="button" class="stock-name-clickable" data-action="toggle-history"
+                                data-history-id="${historyId}" data-stock="${safeStock}"
+                                aria-expanded="false" aria-controls="${historyId}">
+                            ${safeStock} <span class="expand-icon" aria-hidden="true">▼</span>
+                        </button>
+                        <button type="button" class="btn-rename" data-action="rename-stock"
+                                data-stock="${safeStock}" title="Přejmenovat ticker"
+                                aria-label="Přejmenovat ticker ${safeStock}">✎</button>
+                    </span>
                 </td>
                 <td>${formatNumber(holding.quantity)}</td>
                 <td class="highlight-green">${formatNumber(holding.three_year_quantity)}</td>
                 <td>${formatCurrency(holding.average_purchase_price)}</td>
-                <td>${holding.current_price !== null ? formatCurrency(holding.current_price) : '<span style="color: #999;">Nedostupné</span>'}</td>
+                <td>${holding.current_price !== null ? formatCurrency(holding.current_price) : '<span class="unavailable">Nedostupné</span>'}</td>
                 <td>${holding.total_value !== null ? formatCurrency(holding.total_value) : '-'}</td>
                 <td class="${profitLossClass}">
-                    ${holding.profit_loss !== null ? formatCurrency(holding.profit_loss) : '-'}
+                    ${holding.profit_loss !== null ? formatSignedCurrency(holding.profit_loss) : '-'}
                 </td>
             </tr>
             <tr class="history-row" id="${historyId}" style="display: none;">
                 <td colspan="7" class="history-cell">
                     <div class="history-content">
-                        <h4>
+                        <h3>
                             Historie transakcí pro
                             <a href="https://finance.yahoo.com/quote/${encodeURIComponent(holding.stock_name)}"
                                target="_blank"
                                rel="noopener noreferrer">${safeStock}</a>
-                        </h4>
+                        </h3>
                         <div id="history-content-${index}" class="loading">Načítání...</div>
                     </div>
                 </td>
@@ -128,16 +142,15 @@ function displayProfitLoss(holdings) {
         }
 
         const profitLoss = holding.profit_loss || 0;
-        const pct = holding.total_cost > 0 ? (profitLoss / holding.total_cost) * 100 : 0;
+        const pct = percentOfCost(profitLoss, holding.total_cost);
         const cls = profitLoss >= 0 ? 'profit' : 'loss';
-        const sign = pct >= 0 ? '+' : '';
         return `
             <tr>
                 <td><strong>${escapeHtml(holding.stock_name)}</strong></td>
                 <td>${formatCurrency(holding.total_value)}</td>
                 <td>${formatCurrency(holding.total_cost)}</td>
-                <td class="${cls}">${formatCurrency(profitLoss)}</td>
-                <td class="${cls}">${sign}${pct.toFixed(2)}%</td>
+                <td class="${cls}">${formatSignedCurrency(profitLoss)}</td>
+                <td class="${cls}">${formatPercentage(pct)}</td>
             </tr>
         `;
     }).join('');
@@ -176,7 +189,8 @@ export async function loadHoldings() {
 
 export function initHoldingsSort() {
     document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
-        th.addEventListener('click', () => {
+        const btn = th.querySelector('.sort-btn') || th;
+        btn.addEventListener('click', () => {
             const key = th.dataset.sortKey;
             if (key) handleHoldingsSort(key);
         });
