@@ -82,6 +82,12 @@ export function getSurfaceColor() {
     return cssToken('--surface', '#fdfdfb');
 }
 
+export function getChartPalette() {
+    const raw = cssToken('--chart-palette');
+    const colors = raw.split(',').map(c => c.trim()).filter(Boolean);
+    return colors.length ? colors : ['#1c776c', '#b8862b', '#a33a2e', '#3f5f8a'];
+}
+
 export function toggleTheme() {
     const idx = CYCLE.indexOf(currentMode);
     currentMode = CYCLE[(idx + 1) % CYCLE.length];

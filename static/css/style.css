@@ -58,6 +58,11 @@
     --chart-grid: rgba(22, 28, 34, 0.07);
     --scrollbar-thumb: #c9c6bb;
 
+    /* Distinct hues for the portfolio doughnut, spread around the wheel so
+       adjacent slices never read as shades of one another. Muted enough to
+       sit on paper. Read by charts.js, so this is the only definition. */
+    --chart-palette: #1c776c, #b8862b, #a33a2e, #3f5f8a, #6f7d33, #7d4b6b, #4b4b8f, #2f7d4f;
+
     --font-text: 'IBM Plex Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
     --font-num: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
 }
@@ -89,6 +94,9 @@
     --msg-error-border: rgba(251, 113, 133, 0.34);
     --chart-grid: rgba(232, 234, 236, 0.08);
     --scrollbar-thumb: #3a4756;
+
+    /* Same hues, lifted so they carry against the dark ground. */
+    --chart-palette: #4fc0b1, #e0ad4a, #e0705f, #7fa3d8, #b0c261, #c489ae, #8f8fd9, #5fc183;
 }
 
 body {
@@ -159,9 +167,14 @@ header {
 
 header h1 {
     font-size: 1rem;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: -0.005em;
-    margin-bottom: 0;
+    margin-bottom: 0.125rem;
+}
+
+.subtitle {
+    font-size: 0.8125rem;
+    color: var(--ink-muted);
 }
 
 /*

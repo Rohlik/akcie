@@ -5,19 +5,13 @@
 import { formatCurrency, percentOfCost, escapeHtml } from './format.js';
 import {
     getChartTextColor, getChartGridColor,
-    getGainColor, getLossColor, getSurfaceColor,
+    getGainColor, getLossColor, getSurfaceColor, getChartPalette,
 } from './theme.js';
 
 let profitLossChart = null;
 let portfolioDistributionChart = null;
 let yearlyProfitLossChart = null;
-
-// Single-hue ramp ordered by position size, so the color itself encodes
-// "biggest holding" instead of assigning arbitrary hues per ticker.
-const DISTRIBUTION_RAMP = [
-    '#0b3d3a', '#125a53', '#1c776c', '#2a9385',
-    '#4aae9d', '#77c5b6', '#a6dbd0', '#d2ece6',
-];
+let lastDistribution = [];
 
 function signedColors(values) {
     const gain = getGainColor();
@@ -121,7 +115,11 @@ export function updatePortfolioDistributionChart(holdings) {
     const labels = sorted.map(h => h.stock_name);
     const values = sorted.map(h => h.total_value || 0);
 
-    const backgroundColors = values.map((_, i) => DISTRIBUTION_RAMP[i % DISTRIBUTION_RAMP.length]);
+    const palette = getChartPalette();
+    const backgroundColors = values.map((_, i) => palette[i % palette.length]);
+    // Kept so a theme switch can repaint the slices and the HTML legend, which
+    // carries the same colors as inline swatches.
+    lastDistribution = sorted;
 
     // The full "ticker: 1 234,00 Kč (23.4%)" strings used to be Chart.js legend
     // entries and got clipped at the canvas edge. They render as real HTML
@@ -310,7 +308,10 @@ document.addEventListener('themechange', () => {
         }
         chart.data.datasets.forEach(dataset => {
             if (chart === portfolioDistributionChart) {
+                const palette = getChartPalette();
+                dataset.backgroundColor = dataset.data.map((_, i) => palette[i % palette.length]);
                 dataset.borderColor = getSurfaceColor();
+                renderDistributionLegend(lastDistribution, dataset.backgroundColor);
             } else {
                 dataset.backgroundColor = signedColors(dataset.data);
             }
