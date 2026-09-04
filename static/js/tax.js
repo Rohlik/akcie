@@ -4,6 +4,7 @@ import { formatCurrency, escapeHtml } from './format.js';
 import { readJson, extractErrorMessage } from './api.js';
 import { handleError } from './ui.js';
 import { updateYearlyProfitLossChart } from './charts.js';
+import { enhanceSelect } from './select.js';
 
 // Past this many tax years the pills stop fitting the header, so the same
 // control becomes a select. A long-running portfolio hits this eventually.
@@ -22,18 +23,22 @@ function renderYearSwitch(years, current) {
 
     if (years.length > MAX_PILLS) {
         host.classList.remove('years');
+        host.classList.add('years-select');
         host.innerHTML = `
             <label class="visually-hidden" for="year-select">Daňový rok</label>
             <select id="year-select" class="year-select">
                 ${years.map(y => `<option value="${y}" ${y === current ? 'selected' : ''}>Rok ${y}</option>`).join('')}
             </select>`;
-        host.querySelector('#year-select').addEventListener('change', event => {
+        const select = host.querySelector('#year-select');
+        select.addEventListener('change', event => {
             selectedYear = parseInt(event.target.value, 10);
             loadTaxInfo();
         });
+        enhanceSelect(select, { label: 'Daňový rok' });
         return;
     }
 
+    host.classList.remove('years-select');
     host.classList.add('years');
     host.innerHTML = years.map(y => `
         <button type="button" class="yr" data-year="${y}" aria-pressed="${y === current}">${y}</button>

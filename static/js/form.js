@@ -7,6 +7,7 @@ import { showMessage, showFieldError, clearFieldErrors, handleError, setLoading 
 import { loadHoldings, getAvailableSellQuantities } from './holdings.js';
 import { loadTaxInfo } from './tax.js';
 import { reloadDataAfterMutation } from './transactions.js';
+import { enhanceSelect } from './select.js';
 
 function currentType() {
     return document.getElementById('type')?.value || 'buy';
@@ -42,10 +43,12 @@ function updateStockNameField() {
     if (!textInput || !selectInput) return;
 
     // Each control keeps its own <label for>, so whichever one is showing is
-    // the one that is labelled.
+    // the one that is labelled. The select is wrapped by its custom listbox,
+    // so visibility is toggled on the wrapper.
+    const combo = enhanceSelect(selectInput, { label: 'Akcie' });
     textInput.hidden = selling;
     textInput.toggleAttribute('required', !selling);
-    selectInput.hidden = !selling;
+    (combo?.wrap || selectInput).hidden = !selling;
     selectInput.toggleAttribute('required', selling);
     if (textLabel) textLabel.hidden = selling;
     if (selectLabel) selectLabel.hidden = !selling;
@@ -69,6 +72,7 @@ async function loadAvailableStocks() {
                 const safe = escapeHtml(h.stock_name);
                 return `<option value="${safe}" data-available-qty="${h.quantity}">${safe} (${formatNumber(h.quantity)} ks)</option>`;
             }).join('');
+        enhanceSelect(selectInput, { label: 'Akcie' })?.refresh();
 
         if (!selectInput.dataset.qtyListeners) {
             selectInput.dataset.qtyListeners = '1';

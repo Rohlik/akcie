@@ -181,21 +181,93 @@ header h1 {
     box-shadow: 0 0 0 1px var(--edge);
 }
 
-/* Past a handful of tax years the pills stop fitting; the same control
-   becomes a select and the row keeps its height. */
-.year-select {
-    min-height: 40px;
-    padding: 0 34px 0 13px;
+/* ---- listbox ------------------------------------------------------------- */
+
+/* The native select popup is drawn by the OS: dim text on our dark ground and
+   a system-blue highlight, neither reliably styleable. The native element
+   stays as the value holder, hidden, and this is what the user sees. */
+.combo-wrap { position: relative; }
+
+.combo-native {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.combo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 42px;
+    padding: 0 36px 0 13px;
     border-radius: 11px;
     border: 1px solid var(--edge);
-    background: var(--glass);
+    background: var(--sunken);
     color: var(--ink);
     font-family: var(--num);
-    font-size: 13px;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238996a8' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    font-variant-numeric: tabular-nums;
+    font-size: 13.5px;
+    text-align: left;
+    transition: border-color .2s, box-shadow .2s;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: right 12px center;
+    background-position: right 13px center;
+}
+.combo:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--edge)); }
+.combo[aria-expanded="true"] {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.combo.is-placeholder { color: var(--faint); }
+
+/* The year switch reuses the control at header scale. */
+.years-select .combo { min-height: 40px; font-size: 13px; background-color: var(--glass); }
+
+.combo-list {
+    position: absolute;
+    z-index: 50;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    min-width: 100%;
+    max-height: 288px;
+    overflow-y: auto;
+    padding: 5px;
+    border-radius: 12px;
+    border: 1px solid var(--edge);
+    background: var(--void);
+    box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .7);
+}
+[data-theme="dark"] .combo-list { background: #131a22; }
+
+.combo-opt {
+    display: flex;
+    align-items: center;
+    min-height: 38px;
+    padding: 0 11px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: var(--num);
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    color: var(--ink);
+}
+.combo-opt.is-placeholder { color: var(--faint); }
+.combo-opt.is-active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--ink);
+}
+.combo-opt[aria-selected="true"] {
+    color: var(--accent);
+    font-weight: 600;
+}
+.combo-opt[aria-selected="true"]::after {
+    content: '✓';
+    margin-left: auto;
+    padding-left: 12px;
+    font-size: 12px;
 }
 
 .btn {
