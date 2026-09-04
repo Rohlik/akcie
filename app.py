@@ -161,8 +161,15 @@ def get_holdings_api():
                 'profit_loss': profit_loss,
                 'total_cost': data['total_cost']
             })
-        
-        return jsonify({'holdings': holdings_list}), 200
+
+        # Newest successful Yahoo fetch, so the page can say how stale it is.
+        fetched = [sp['last_updated'] for sp in stock_prices
+                   if sp['status'] == 'available' and sp['last_updated']]
+
+        return jsonify({
+            'holdings': holdings_list,
+            'prices_updated_at': max(fetched) if fetched else None,
+        }), 200
         
     except Exception as e:
         logger.error(f"Error getting holdings: {e}", exc_info=True)

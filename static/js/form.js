@@ -1,4 +1,5 @@
-// "Přidat transakci" form: validation, sell-quantity cap, and submission.
+// "Přidat transakci": type switch, required-field validation, sell cap,
+// submission, and the phone bottom sheet.
 
 import { formatNumber, parseCsDateToIso, csDatePickerOptions, escapeHtml } from './format.js';
 import { csrfFetch, readJson, extractErrorMessage } from './api.js';
@@ -8,7 +9,7 @@ import { loadTaxInfo } from './tax.js';
 import { reloadDataAfterMutation } from './transactions.js';
 
 function currentType() {
-    return document.getElementById('type')?.value;
+    return document.getElementById('type')?.value || 'buy';
 }
 
 function stockNameInput() {
@@ -17,8 +18,23 @@ function stockNameInput() {
         : document.getElementById('stock_name');
 }
 
+function setType(type) {
+    const hidden = document.getElementById('type');
+    if (hidden) hidden.value = type;
+
+    const buy = document.getElementById('type-buy');
+    const sell = document.getElementById('type-sell');
+    if (buy) buy.setAttribute('aria-pressed', String(type === 'buy'));
+    if (sell) sell.setAttribute('aria-pressed', String(type === 'sell'));
+
+    const submit = document.getElementById('submit-btn');
+    if (submit) submit.textContent = type === 'sell' ? 'Přidat prodej' : 'Přidat nákup';
+
+    updateStockNameField();
+}
+
 function updateStockNameField() {
-    const type = currentType();
+    const selling = currentType() === 'sell';
     const textInput = document.getElementById('stock_name');
     const selectInput = document.getElementById('stock_name_select');
     const textLabel = document.getElementById('stock_name_label');
@@ -27,7 +43,6 @@ function updateStockNameField() {
 
     // Each control keeps its own <label for>, so whichever one is showing is
     // the one that is labelled.
-    const selling = type === 'sell';
     textInput.hidden = selling;
     textInput.toggleAttribute('required', !selling);
     selectInput.hidden = !selling;
@@ -43,32 +58,29 @@ async function loadAvailableStocks() {
         const response = await fetch('/api/holdings');
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to load holdings'));
+            throw new Error(extractErrorMessage(data, 'Nepodařilo se načíst pozice'));
         }
 
         const selectInput = document.getElementById('stock_name_select');
-        const availableStocks = data.holdings.filter(h => h.quantity > 0);
+        const available = data.holdings.filter(h => h.quantity > 0);
 
-        selectInput.innerHTML = '<option value="">Vyberte akcii...</option>' +
-            availableStocks.map(h => {
+        selectInput.innerHTML = '<option value="">Vyberte akcii…</option>' +
+            available.map(h => {
                 const safe = escapeHtml(h.stock_name);
                 return `<option value="${safe}" data-available-qty="${h.quantity}">${safe} (${formatNumber(h.quantity)} ks)</option>`;
             }).join('');
 
-        const quantityInput = document.getElementById('quantity');
         if (!selectInput.dataset.qtyListeners) {
             selectInput.dataset.qtyListeners = '1';
             selectInput.addEventListener('change', () => updateSellQuantityLimit(true));
-            if (quantityInput) {
-                quantityInput.addEventListener('input', () => {
-                    if (currentType() === 'sell') updateSellQuantityLimit(true);
-                });
-            }
+            document.getElementById('quantity')?.addEventListener('input', () => {
+                if (currentType() === 'sell') updateSellQuantityLimit(true);
+            });
         }
 
         updateSellQuantityLimit(false);
     } catch (error) {
-        handleError(error, 'Chyba při načítání dostupných akcií');
+        handleError(error, 'Dostupné akcie se nepodařilo načíst.');
     }
 }
 
@@ -94,7 +106,7 @@ function updateSellQuantityLimit(showErrors) {
     if (showErrors) validateSellQuantityAgainstHoldings(true);
 }
 
-function validateSellQuantityAgainstHoldings(showFieldErrors) {
+function validateSellQuantityAgainstHoldings(showErrors) {
     if (currentType() !== 'sell') return true;
     const selectInput = document.getElementById('stock_name_select');
     const quantityInput = document.getElementById('quantity');
@@ -103,16 +115,12 @@ function validateSellQuantityAgainstHoldings(showFieldErrors) {
     const stockName = selectInput.value;
     if (!stockName) return true;
 
-    const available = getAvailableSellQuantities();
-    const maxQty = available[stockName] ?? 0;
+    const maxQty = getAvailableSellQuantities()[stockName] ?? 0;
     const qty = parseInt(quantityInput.value, 10) || 0;
 
     if (maxQty > 0 && qty > maxQty) {
-        if (showFieldErrors) {
-            showFieldError(
-                quantityInput,
-                'Nelze prodat více kusů než je aktuálně drženo z důvodu zaručení správného výpočtu daňových informací.'
-            );
+        if (showErrors) {
+            showFieldError(quantityInput, `Držíte jen ${formatNumber(maxQty)} ks. Zadejte nejvýše tolik.`);
         }
         return false;
     }
@@ -120,7 +128,6 @@ function validateSellQuantityAgainstHoldings(showFieldErrors) {
 }
 
 function validateForm() {
-    const type = currentType();
     const nameInput = stockNameInput();
     const priceInput = document.getElementById('price');
     const quantityInput = document.getElementById('quantity');
@@ -131,13 +138,13 @@ function validateForm() {
     let valid = true;
 
     if (!nameInput.value.trim()) {
-        showFieldError(nameInput, 'Název akcie je povinný');
+        showFieldError(nameInput, 'Vyberte akcii');
         valid = false;
     }
 
     const isoDate = parseCsDateToIso(dateInput.value);
     if (!isoDate) {
-        showFieldError(dateInput, 'Zadejte platné datum ve formátu DD.MM.YYYY');
+        showFieldError(dateInput, 'Zadejte datum ve formátu DD.MM.RRRR');
         valid = false;
     }
 
@@ -153,7 +160,7 @@ function validateForm() {
         valid = false;
     }
 
-    if (type === 'sell' && !validateSellQuantityAgainstHoldings(true)) valid = false;
+    if (!validateSellQuantityAgainstHoldings(true)) valid = false;
 
     const fees = parseFloat(feesInput.value) || 0;
     if (fees < 0) {
@@ -161,32 +168,47 @@ function validateForm() {
         valid = false;
     }
 
+    if (!valid) {
+        document.querySelector('[aria-invalid="true"]')?.focus();
+    }
+
     return { valid, isoDate };
 }
 
-function initDatePicker() {
-    const dateInput = document.getElementById('date');
-    if (!dateInput) return;
-    flatpickr(dateInput, csDatePickerOptions(new Date()));
+// --- phone bottom sheet ------------------------------------------------------
+
+function openSheet() {
+    document.body.classList.add('sheet-open');
+    document.getElementById('sheet-close')?.removeAttribute('hidden');
+    document.getElementById('stock_name')?.focus();
+}
+
+function closeSheet() {
+    document.body.classList.remove('sheet-open');
+    document.getElementById('sheet-close')?.setAttribute('hidden', '');
+    document.getElementById('add-fab')?.focus();
 }
 
 export function initTransactionForm() {
     const form = document.getElementById('transaction-form');
     if (!form) return;
 
-    initDatePicker();
+    const dateInput = document.getElementById('date');
+    if (dateInput && window.flatpickr) flatpickr(dateInput, csDatePickerOptions(new Date()));
 
-    const typeSelect = document.getElementById('type');
-    if (typeSelect) {
-        typeSelect.addEventListener('change', updateStockNameField);
-        updateStockNameField();
-    }
+    document.getElementById('type-buy')?.addEventListener('click', () => setType('buy'));
+    document.getElementById('type-sell')?.addEventListener('click', () => setType('sell'));
+    setType('buy');
+
+    document.getElementById('add-fab')?.addEventListener('click', openSheet);
+    document.getElementById('sheet-close')?.addEventListener('click', closeSheet);
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && document.body.classList.contains('sheet-open')) closeSheet();
+    });
 
     form.addEventListener('submit', async event => {
         event.preventDefault();
-
-        const submitBtn = form.querySelector('button[type="submit"]');
-        setLoading(submitBtn?.id || 'submit-btn', true);
+        setLoading('submit-btn', true);
 
         try {
             const { valid, isoDate } = validateForm();
@@ -207,26 +229,23 @@ export function initTransactionForm() {
             });
             const data = await readJson(response);
             if (!response.ok) {
-                throw new Error(extractErrorMessage(data, 'Failed to add transaction'));
+                throw new Error(extractErrorMessage(data, 'Transakci se nepodařilo přidat'));
             }
 
-            showMessage('Transakce byla úspěšně přidána', 'success');
-
+            showMessage('Transakce přidána', 'success');
             form.reset();
-            const dateInput = document.getElementById('date');
-            if (dateInput && dateInput._flatpickr) {
-                dateInput._flatpickr.setDate(new Date(), false);
-            }
+            clearFieldErrors();
+            if (dateInput?._flatpickr) dateInput._flatpickr.setDate(new Date(), false);
+            if (document.body.classList.contains('sheet-open')) closeSheet();
 
             // Reload first so holdings are fresh before the sell-select
-            // repopulates; otherwise updateStockNameField would also fire its
-            // own /api/holdings fetch.
+            // repopulates; otherwise setType would also fire its own fetch.
             await reloadDataAfterMutation();
-            updateStockNameField();
+            setType(payload.type);
         } catch (error) {
-            handleError(error, 'Chyba při přidávání transakce: ' + error.message);
+            handleError(error, 'Transakci se nepodařilo přidat: ' + error.message);
         } finally {
-            setLoading(submitBtn?.id || 'submit-btn', false);
+            setLoading('submit-btn', false);
         }
     });
 }
@@ -236,25 +255,28 @@ export function initUpdatePricesButton() {
     if (!btn) return;
 
     btn.addEventListener('click', async () => {
-        const originalText = btn.textContent;
+        const original = btn.innerHTML;
         btn.disabled = true;
-        btn.textContent = 'Aktualizuji...';
+        btn.textContent = 'Aktualizuji…';
 
         try {
             const response = await csrfFetch('/api/update-prices', { method: 'POST' });
             const data = await readJson(response);
             if (!response.ok) {
-                throw new Error(extractErrorMessage(data, 'Failed to update prices'));
+                throw new Error(extractErrorMessage(data, 'Aktualizace se nezdařila'));
             }
-            showMessage(`Ceny aktualizovány: ${data.updated} úspěšně, ${data.failed} selhalo`, 'success');
-            // Only holdings and tax info depend on current prices; no
-            // transactions changed, so Obchody and yearly P/L can stay as-is.
+            showMessage(
+                data.failed
+                    ? `Ceny aktualizovány: ${data.updated} načteno, ${data.failed} se nepodařilo`
+                    : `Ceny aktualizovány: ${data.updated} načteno`,
+                data.failed ? 'error' : 'success'
+            );
             await Promise.all([loadHoldings(), loadTaxInfo()]);
         } catch (error) {
-            handleError(error, 'Chyba při aktualizaci cen: ' + error.message);
+            handleError(error, 'Ceny se nepodařilo aktualizovat: ' + error.message);
         } finally {
             btn.disabled = false;
-            btn.textContent = originalText;
+            btn.innerHTML = original;
         }
     });
 }

@@ -1,360 +1,190 @@
-// All Chart.js instances live here so theme refreshes and mutations stay
-// in one place. Modules that need to re-render a chart import the updater
-// directly and pass in fresh data.
+// Charts are hand-drawn SVG and CSS rather than a charting library: three
+// simple figures did not justify a CDN dependency that cannot follow the
+// theme tokens.
 
-import { formatCurrency, percentOfCost, escapeHtml } from './format.js';
-import {
-    getChartTextColor, getChartGridColor,
-    getGainColor, getLossColor, getSurfaceColor, getChartPalette,
-} from './theme.js';
+import { formatCurrency, formatSignedCurrency, percentOfCost, escapeHtml } from './format.js';
+import { getChartPalette } from './theme.js';
 
-let profitLossChart = null;
-let portfolioDistributionChart = null;
-let yearlyProfitLossChart = null;
-let lastDistribution = [];
+const RADIUS = 62;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-function signedColors(values) {
-    const gain = getGainColor();
-    const loss = getLossColor();
-    return values.map(v => (v >= 0 ? gain : loss));
-}
+let tooltipEl = null;
 
-export function applyChartDefaults() {
-    if (typeof Chart === 'undefined') return;
-    Chart.defaults.font.family = "'IBM Plex Sans', system-ui, sans-serif";
-    Chart.defaults.font.size = 12;
-    Chart.defaults.color = getChartTextColor();
-}
-
-export function updateProfitLossChart(holdings) {
-    const ctx = document.getElementById('profit-loss-chart');
-    if (!ctx) return;
-
-    const validHoldings = holdings.filter(h => h.profit_loss !== null && h.profit_loss !== undefined);
-    if (validHoldings.length === 0) {
-        if (profitLossChart) {
-            profitLossChart.destroy();
-            profitLossChart = null;
-        }
-        ctx.parentElement.innerHTML = '<p class="loading">Žádná data pro zobrazení</p>';
-        return;
+function tooltip() {
+    if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'tip';
+        tooltipEl.hidden = true;
+        document.body.appendChild(tooltipEl);
     }
-
-    resizeProfitLossContainer(validHoldings.length, ctx);
-
-    const sortedHoldings = [...validHoldings].sort((a, b) => (b.profit_loss || 0) - (a.profit_loss || 0));
-    const labels = sortedHoldings.map(h => h.stock_name);
-    const data = sortedHoldings.map(h => h.profit_loss || 0);
-
-    const config = {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [{
-                label: 'Zisk/Ztráta (CZK)',
-                data,
-                backgroundColor: signedColors(data),
-                borderWidth: 0,
-                borderRadius: 2,
-                borderSkipped: false,
-            }],
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: tooltipOptions({
-                    label(context) {
-                        const value = context.parsed.x;
-                        const holding = sortedHoldings[context.dataIndex];
-                        const percent = percentOfCost(value, holding.total_cost).toFixed(2);
-                        return [`Zisk/Ztráta: ${formatCurrency(value)}`, `Procento: ${percent}%`];
-                    },
-                }),
-            },
-            scales: {
-                x: {
-                    beginAtZero: true,
-                    grid: { color: getChartGridColor() },
-                    ticks: {
-                        color: getChartTextColor(),
-                        callback: v => formatCurrency(v),
-                    },
-                },
-                y: {
-                    grid: { display: false },
-                    ticks: { color: getChartTextColor() },
-                },
-            },
-        },
-    };
-
-    if (profitLossChart) profitLossChart.destroy();
-    profitLossChart = new Chart(ctx, config);
+    return tooltipEl;
 }
+
+function showTip(html, event) {
+    const tip = tooltip();
+    tip.innerHTML = html;
+    tip.hidden = false;
+    const pad = 14;
+    const rect = tip.getBoundingClientRect();
+    let x = event.clientX + pad;
+    let y = event.clientY + pad;
+    if (x + rect.width > window.innerWidth - 8) x = event.clientX - rect.width - pad;
+    if (y + rect.height > window.innerHeight - 8) y = event.clientY - rect.height - pad;
+    tip.style.left = `${Math.max(8, x)}px`;
+    tip.style.top = `${Math.max(8, y)}px`;
+}
+
+function hideTip() {
+    if (tooltipEl) tooltipEl.hidden = true;
+}
+
+// --- Distribution ring --------------------------------------------------------
 
 export function updatePortfolioDistributionChart(holdings) {
-    const ctx = document.getElementById('portfolio-distribution-chart');
-    if (!ctx) return;
+    const svg = document.getElementById('distribution-chart');
+    const legend = document.getElementById('distribution-legend');
+    const totalEl = document.getElementById('donut-total');
+    if (!svg || !legend) return;
 
-    const valid = holdings.filter(h => h.total_value !== null && h.total_value !== undefined && h.total_value > 0);
-    if (valid.length === 0) {
-        if (portfolioDistributionChart) {
-            portfolioDistributionChart.destroy();
-            portfolioDistributionChart = null;
-        }
-        const legend = document.getElementById('portfolio-distribution-legend');
-        if (legend) legend.innerHTML = '';
-        ctx.parentElement.innerHTML = '<p class="loading">Žádná data pro zobrazení</p>';
+    const valued = holdings
+        .filter(h => h.total_value !== null && h.total_value !== undefined && h.total_value > 0)
+        .sort((a, b) => b.total_value - a.total_value);
+
+    const total = valued.reduce((sum, h) => sum + h.total_value, 0);
+    if (totalEl) totalEl.textContent = total > 0 ? formatCurrency(total) : '—';
+
+    if (!valued.length) {
+        svg.innerHTML = '<title>Rozložení portfolia podle pozice</title>';
+        legend.innerHTML = '<div class="loading">Zatím žádné oceněné pozice</div>';
         return;
     }
-
-    const sorted = [...valid].sort((a, b) => (b.total_value || 0) - (a.total_value || 0));
-    const labels = sorted.map(h => h.stock_name);
-    const values = sorted.map(h => h.total_value || 0);
 
     const palette = getChartPalette();
-    const backgroundColors = values.map((_, i) => palette[i % palette.length]);
-    // Kept so a theme switch can repaint the slices and the HTML legend, which
-    // carries the same colors as inline swatches.
-    lastDistribution = sorted;
+    let offset = 0;
+    const slices = valued.map((h, i) => {
+        const share = h.total_value / total;
+        const slice = {
+            name: h.stock_name,
+            value: h.total_value,
+            share,
+            color: palette[i % palette.length],
+            dash: `${(share * CIRCUMFERENCE - 2).toFixed(2)} ${CIRCUMFERENCE.toFixed(2)}`,
+            offset: (-offset * CIRCUMFERENCE).toFixed(2),
+        };
+        offset += share;
+        return slice;
+    });
 
-    // The full "ticker: 1 234,00 Kč (23.4%)" strings used to be Chart.js legend
-    // entries and got clipped at the canvas edge. They render as real HTML
-    // beside the canvas instead, which also makes them selectable.
-    renderDistributionLegend(sorted, backgroundColors);
+    svg.innerHTML = `
+        <title>Rozložení portfolia podle pozice</title>
+        ${slices.map((s, i) => `
+            <circle class="slice" data-i="${i}" cx="80" cy="80" r="${RADIUS}" fill="none"
+                    stroke="${s.color}" stroke-width="19"
+                    stroke-dasharray="${s.dash}" stroke-dashoffset="${s.offset}"
+                    transform="rotate(-90 80 80)"></circle>`).join('')}
+        <text x="80" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace"
+              font-size="16" font-weight="700" fill="var(--ink)">${escapeHtml(compact(total))}</text>
+        <text x="80" y="92" text-anchor="middle" font-family="Archivo, sans-serif"
+              font-size="8.5" letter-spacing="1.1" fill="var(--muted)">CELKEM</text>
+    `;
 
-    const config = {
-        type: 'doughnut',
-        data: {
-            labels,
-            datasets: [{
-                data: values,
-                backgroundColor: backgroundColors,
-                borderColor: getSurfaceColor(),
-                borderWidth: 2,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: tooltipOptions({
-                    label(context) {
-                        const label = context.label || '';
-                        const value = context.parsed || 0;
-                        const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                        const pct = ((value / total) * 100).toFixed(1);
-                        return [`${label}: ${formatCurrency(value)}`, `${pct}% portfolia`];
-                    },
-                }),
-            },
-        },
+    legend.innerHTML = slices.map((s, i) => `
+        <div class="drow" data-i="${i}">
+            <span class="sw" style="background: ${s.color}"></span>
+            <span>${escapeHtml(s.name)}</span>
+            <span class="dval">${formatCurrency(s.value)}</span>
+            <span class="dpct">${(s.share * 100).toFixed(1)} %</span>
+        </div>
+    `).join('');
+
+    // Hovering a slice or its legend row highlights both and reports the
+    // position against the portfolio total.
+    const link = (i, on) => {
+        svg.querySelectorAll('.slice').forEach(el => el.classList.toggle('is-active', on && +el.dataset.i === i));
+        legend.querySelectorAll('.drow').forEach(el => el.classList.toggle('is-active', on && +el.dataset.i === i));
     };
 
-    if (portfolioDistributionChart) portfolioDistributionChart.destroy();
-    portfolioDistributionChart = new Chart(ctx, config);
+    const bind = (el) => {
+        const i = +el.dataset.i;
+        const s = slices[i];
+        const body = `<b>${escapeHtml(s.name)}</b> · ${formatCurrency(s.value)}`
+            + ` (${(s.share * 100).toFixed(1)} %)`
+            + `<span class="tip-total">z ${formatCurrency(total)} celkem</span>`;
+        el.addEventListener('mouseenter', e => { link(i, true); showTip(body, e); });
+        el.addEventListener('mousemove', e => showTip(body, e));
+        el.addEventListener('mouseleave', () => { link(i, false); hideTip(); });
+    };
+
+    svg.querySelectorAll('.slice').forEach(bind);
+    legend.querySelectorAll('.drow').forEach(bind);
+
+    // Hovering the ring but not a slice still answers "how much is this worth".
+    const wrap = svg.closest('.donut-wrap');
+    if (wrap && !wrap.dataset.bound) {
+        wrap.dataset.bound = '1';
+        wrap.addEventListener('mouseleave', hideTip);
+    }
 }
 
-export function updateYearlyProfitLossChart(yearlyData) {
-    const ctx = document.getElementById('yearly-profit-loss-chart');
-    if (!ctx) return;
+function compact(value) {
+    if (Math.abs(value) >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+    if (Math.abs(value) >= 1000) return `${Math.round(value / 1000)}k`;
+    return String(Math.round(value));
+}
 
-    if (!yearlyData || yearlyData.length === 0) {
-        if (yearlyProfitLossChart) {
-            yearlyProfitLossChart.destroy();
-            yearlyProfitLossChart = null;
-        }
-        ctx.parentElement.innerHTML = '<p class="loading">Žádné prodeje</p>';
+// --- Diverging bars -------------------------------------------------------------
+
+function renderBars(container, rows) {
+    if (!container) return;
+
+    if (!rows.length) {
+        container.className = 'bars';
+        container.innerHTML = '<div class="loading">Zatím žádná data</div>';
         return;
     }
 
-    const sorted = [...yearlyData].sort((a, b) => b.year - a.year);
-    const labels = sorted.map(d => d.year.toString());
-    const data = sorted.map(d => d.profit_loss || 0);
+    // A series that contains losses gets a centre baseline, so a loss reads as
+    // a loss rather than as a shorter win.
+    const diverging = rows.some(r => r.value < 0);
+    const maxAbs = Math.max(...rows.map(r => Math.abs(r.value))) || 1;
+    const scale = diverging ? 50 : 100;
 
-    const config = {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [{
-                label: 'Zisk/Ztráta (CZK)',
-                data,
-                backgroundColor: signedColors(data),
-                borderWidth: 0,
-                borderRadius: 2,
-                borderSkipped: false,
-            }],
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: tooltipOptions({
-                    label(context) {
-                        const value = context.parsed.y;
-                        const yearData = sorted[context.dataIndex];
-                        const pct = percentOfCost(value, yearData.total_cost).toFixed(2);
-                        return [
-                            `Zisk/Ztráta: ${formatCurrency(value)}`,
-                            `Prodeje: ${formatCurrency(yearData.total_sales)}`,
-                            `Náklady: ${formatCurrency(yearData.total_cost)}`,
-                            `Procento: ${pct}%`,
-                        ];
-                    },
-                }),
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: { color: getChartGridColor() },
-                    ticks: {
-                        color: getChartTextColor(),
-                        callback: v => formatCurrency(v),
-                    },
-                },
-                x: {
-                    grid: { display: false },
-                    ticks: { color: getChartTextColor() },
-                },
-            },
-        },
-    };
-
-    if (yearlyProfitLossChart) yearlyProfitLossChart.destroy();
-    yearlyProfitLossChart = new Chart(ctx, config);
-}
-
-function renderDistributionLegend(sorted, colors) {
-    const list = document.getElementById('portfolio-distribution-legend');
-    if (!list) return;
-
-    const total = sorted.reduce((sum, h) => sum + (h.total_value || 0), 0);
-    list.innerHTML = sorted.map((h, i) => {
-        const value = h.total_value || 0;
-        const pct = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+    container.className = diverging ? 'bars diverging' : 'bars';
+    container.innerHTML = rows.map(r => {
+        const width = (Math.abs(r.value) / maxAbs * scale).toFixed(1);
+        const side = r.value < 0 ? 'neg' : 'pos';
+        const cls = r.value < 0 ? 'loss' : 'gain';
+        const color = r.value < 0 ? 'var(--loss)' : 'var(--gain)';
         return `
-            <div class="legend-row">
-                <span class="legend-swatch" style="background:${colors[i]}" aria-hidden="true"></span>
-                <span class="legend-name">${escapeHtml(h.stock_name)}</span>
-                <span class="legend-value num">${formatCurrency(value)}</span>
-                <span class="legend-pct num">${pct}%</span>
-            </div>
-        `;
+            <div class="bar">
+                <b title="${escapeHtml(r.label)}">${escapeHtml(r.label)}</b>
+                <span class="track"><i class="${side}" style="width: ${width}%; background: ${color}"></i></span>
+                <em class="${cls}">${formatSignedCurrency(r.value)}</em>
+            </div>`;
     }).join('');
 }
 
-function tooltipOptions(callbacks) {
-    return {
-        backgroundColor: getSurfaceColor(),
-        titleColor: getChartTextColor(),
-        bodyColor: getChartTextColor(),
-        borderColor: getChartGridColor(),
-        borderWidth: 1,
-        padding: 10,
-        titleFont: { size: 13, weight: '600' },
-        bodyFont: { size: 12 },
-        callbacks,
-    };
+export function updateProfitLossChart(holdings) {
+    const rows = holdings
+        .filter(h => h.profit_loss !== null && h.profit_loss !== undefined)
+        .sort((a, b) => b.profit_loss - a.profit_loss)
+        .map(h => ({ label: h.stock_name, value: h.profit_loss }));
+    renderBars(document.getElementById('position-bars'), rows);
 }
 
-function resizeProfitLossContainer(barCount, ctx) {
-    const isMobile = window.innerWidth <= 768;
-    const heightPerBar = isMobile ? 40 : 50;
-    const padding = isMobile ? 120 : 160;
-    const minHeight = 300;
-    const calculated = Math.max(minHeight, barCount * heightPerBar + padding);
-    const container = ctx.closest('.chart-container');
-    if (container) container.style.height = `${calculated}px`;
+export function updateYearlyProfitLossChart(yearlyData) {
+    const rows = (yearlyData || [])
+        .slice()
+        .sort((a, b) => b.year - a.year)
+        .map(y => ({ label: String(y.year), value: y.profit_loss || 0 }));
+    renderBars(document.getElementById('year-bars'), rows);
 }
 
-export function resizeProfitLossChartForWindow() {
-    if (!profitLossChart || !profitLossChart.data || !profitLossChart.data.labels) return;
-    const ctx = document.getElementById('profit-loss-chart');
-    if (!ctx) return;
-    resizeProfitLossContainer(profitLossChart.data.labels.length, ctx);
-    profitLossChart.resize();
-}
-
-// Keep chart colors in sync with the current theme. Datasets are repainted
-// too, not just the axes - gain/loss and the doughnut border are theme tokens.
+// Both figures read their colors from CSS tokens, so a theme switch only needs
+// the ring repainted where the palette itself differs.
 document.addEventListener('themechange', () => {
-    const textColor = getChartTextColor();
-    const gridColor = getChartGridColor();
-    if (typeof Chart !== 'undefined') Chart.defaults.color = textColor;
-
-    [profitLossChart, portfolioDistributionChart, yearlyProfitLossChart].forEach(chart => {
-        if (!chart) return;
-        if (chart.options.scales) {
-            Object.values(chart.options.scales).forEach(scale => {
-                if (scale.ticks) scale.ticks.color = textColor;
-                if (scale.grid) scale.grid.color = gridColor;
-            });
-        }
-        if (chart.options.plugins?.legend?.labels) {
-            chart.options.plugins.legend.labels.color = textColor;
-        }
-        if (chart.options.plugins?.tooltip) {
-            Object.assign(chart.options.plugins.tooltip, {
-                backgroundColor: getSurfaceColor(),
-                titleColor: textColor,
-                bodyColor: textColor,
-                borderColor: gridColor,
-            });
-        }
-        chart.data.datasets.forEach(dataset => {
-            if (chart === portfolioDistributionChart) {
-                const palette = getChartPalette();
-                dataset.backgroundColor = dataset.data.map((_, i) => palette[i % palette.length]);
-                dataset.borderColor = getSurfaceColor();
-                renderDistributionLegend(lastDistribution, dataset.backgroundColor);
-            } else {
-                dataset.backgroundColor = signedColors(dataset.data);
-            }
-        });
-        chart.update();
-    });
+    hideTip();
+    document.dispatchEvent(new CustomEvent('chartsneedrepaint'));
 });
 
-// Toggle chart/table view in the "Přehled zisků a ztrát" and
-// "Zisk/Ztráta podle kalendářního roku" cards. Uses data-view attributes
-// on the buttons, so no inline onclick is required in the template.
-function initViewToggle(chartContainerId, tableContainerId, toggleSelector, onShowChart) {
-    const chartContainer = document.getElementById(chartContainerId);
-    const tableContainer = document.getElementById(tableContainerId);
-    if (!chartContainer || !tableContainer) return;
-
-    document.querySelectorAll(toggleSelector).forEach(btn => {
-        btn.addEventListener('click', () => {
-            const view = btn.dataset.view;
-            const showChart = view === 'chart';
-            chartContainer.style.display = showChart ? 'block' : 'none';
-            tableContainer.style.display = showChart ? 'none' : 'block';
-            document.querySelectorAll(toggleSelector).forEach(b => {
-                b.classList.toggle('active', b.dataset.view === view);
-            });
-            if (showChart && onShowChart) {
-                setTimeout(onShowChart, 100);
-            }
-        });
-    });
-}
-
-export function initChartToggles() {
-    initViewToggle(
-        'profit-loss-chart-container',
-        'profit-loss-table-container',
-        '[data-toggle="profit-loss"]',
-        resizeProfitLossChartForWindow,
-    );
-    initViewToggle(
-        'yearly-profit-loss-chart-container',
-        'yearly-profit-loss-table-container',
-        '[data-toggle="yearly-profit-loss"]',
-        null,
-    );
-}
+export { percentOfCost };

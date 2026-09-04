@@ -1,15 +1,13 @@
-// Portfolio ("Holdings") table: loads data, renders rows, supports
-// session-only column sort, and triggers chart refreshes.
+// Portfolio list: loads data, renders rows, supports session-only column sort,
+// and triggers the distribution and position-bar redraws.
 
-import {
-    formatCurrency, formatSignedCurrency, formatNumber, formatPercentage,
-    percentOfCost, escapeHtml,
-} from './format.js';
+import { formatCurrency, formatSignedCurrency, formatNumber, escapeHtml } from './format.js';
 import { setLoading, handleError } from './ui.js';
 import { extractErrorMessage, readJson } from './api.js';
 import { updateProfitLossChart, updatePortfolioDistributionChart } from './charts.js';
 
 let currentHoldings = [];
+let lastUpdatedAt = null;
 const sortState = { key: null, direction: null };
 
 function compareHoldingValues(a, b, direction) {
@@ -34,15 +32,11 @@ function getSortedHoldings() {
 }
 
 function updateSortIndicators() {
-    document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
-        th.classList.remove('sorted-asc', 'sorted-desc');
+    document.querySelectorAll('#holdings-table .cols [data-sort-key]').forEach(th => {
         const active = th.dataset.sortKey === sortState.key && sortState.direction;
-        if (active) {
-            th.classList.add(`sorted-${sortState.direction}`);
-            th.setAttribute('aria-sort', sortState.direction === 'asc' ? 'ascending' : 'descending');
-        } else {
-            th.setAttribute('aria-sort', 'none');
-        }
+        th.setAttribute('aria-sort', active
+            ? (sortState.direction === 'asc' ? 'ascending' : 'descending')
+            : 'none');
     });
 }
 
@@ -51,55 +45,44 @@ function displayHoldings(holdings) {
     if (!tbody) return;
 
     if (holdings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="loading">Žádné akcie v portfoliu</td></tr>';
+        tbody.innerHTML = '<div class="loading">Zatím žádné pozice. Přidejte první transakci.</div>';
         return;
     }
 
     tbody.innerHTML = holdings.map((holding, index) => {
-        const isThreeYear = holding.three_year_quantity > 0;
-        const rowClass = isThreeYear ? 'three-year-holding' : '';
-        const profitLossClass = holding.profit_loss !== null
-            ? (holding.profit_loss >= 0 ? 'profit' : 'loss')
-            : '';
         const historyId = `history-${index}`;
         const safeStock = escapeHtml(holding.stock_name);
+        const plClass = holding.profit_loss !== null
+            ? (holding.profit_loss >= 0 ? 'gain' : 'loss')
+            : 'dim';
+        const exempt = holding.three_year_quantity > 0;
 
         return `
-            <tr class="${rowClass} holding-row" data-stock="${safeStock}" id="holding-row-${index}">
-                <td>
-                    <span class="stock-cell">
-                        <button type="button" class="stock-name-clickable" data-action="toggle-history"
-                                data-history-id="${historyId}" data-stock="${safeStock}"
-                                aria-expanded="false" aria-controls="${historyId}">
-                            ${safeStock} <span class="expand-icon" aria-hidden="true">▼</span>
-                        </button>
-                        <button type="button" class="btn-rename" data-action="rename-stock"
-                                data-stock="${safeStock}" title="Přejmenovat ticker"
-                                aria-label="Přejmenovat ticker ${safeStock}">✎</button>
+            <div class="lot" data-stock="${safeStock}">
+                <button type="button" class="rowbtn" data-action="toggle-history"
+                        data-history-id="${historyId}" data-stock="${safeStock}"
+                        aria-expanded="false" aria-controls="${historyId}">
+                    <span class="tick">
+                        <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg>
+                        ${safeStock}
+                        ${exempt ? '<span class="pill" title="Prošlo tříletým časovým testem">3R</span>' : ''}
+                        <span class="btn-rename" data-action="rename-stock" data-stock="${safeStock}"
+                              role="button" tabindex="0" title="Přejmenovat ticker"
+                              aria-label="Přejmenovat ticker ${safeStock}">✎</span>
                     </span>
-                </td>
-                <td>${formatNumber(holding.quantity)}</td>
-                <td class="highlight-green">${formatNumber(holding.three_year_quantity)}</td>
-                <td>${formatCurrency(holding.average_purchase_price)}</td>
-                <td>${holding.current_price !== null ? formatCurrency(holding.current_price) : '<span class="unavailable">Nedostupné</span>'}</td>
-                <td>${holding.total_value !== null ? formatCurrency(holding.total_value) : '-'}</td>
-                <td class="${profitLossClass}">
-                    ${holding.profit_loss !== null ? formatSignedCurrency(holding.profit_loss) : '-'}
-                </td>
-            </tr>
-            <tr class="history-row" id="${historyId}" style="display: none;">
-                <td colspan="7" class="history-cell">
-                    <div class="history-content">
-                        <h3>
-                            Historie transakcí pro
-                            <a href="https://finance.yahoo.com/quote/${encodeURIComponent(holding.stock_name)}"
-                               target="_blank"
-                               rel="noopener noreferrer">${safeStock}</a>
-                        </h3>
-                        <div id="history-content-${index}" class="loading">Načítání...</div>
-                    </div>
-                </td>
-            </tr>
+                    <span class="m-qty">${formatNumber(holding.quantity)}</span>
+                    <span class="m-hide gain">${holding.three_year_quantity ? formatNumber(holding.three_year_quantity) : '—'}</span>
+                    <span class="m-hide dim">${formatCurrency(holding.average_purchase_price)}</span>
+                    <span class="m-hide">${holding.current_price !== null ? formatCurrency(holding.current_price) : '<span class="dim">—</span>'}</span>
+                    <span class="m-val">${holding.total_value !== null ? formatCurrency(holding.total_value) : '—'}</span>
+                    <span class="m-pl ${plClass}">${holding.profit_loss !== null ? formatSignedCurrency(holding.profit_loss) : '—'}</span>
+                </button>
+                <div class="drawer" id="${historyId}" style="grid-template-rows: 0fr">
+                    <div><div class="drawer-in">
+                        <div class="history-content loading" data-history-for="${safeStock}">Načítání…</div>
+                    </div></div>
+                </div>
+            </div>
         `;
     }).join('');
 }
@@ -119,47 +102,60 @@ function handleHoldingsSort(key) {
     renderHoldings();
 }
 
-function displayProfitLoss(holdings) {
-    const tbody = document.getElementById('profit-loss-tbody');
-    if (!tbody) return;
+function updatePortfolioTotals(holdings) {
+    const priced = holdings.filter(h => h.total_value !== null && h.total_value !== undefined);
+    const value = priced.reduce((sum, h) => sum + h.total_value, 0);
+    const cost = priced.reduce((sum, h) => sum + (h.total_cost || 0), 0);
+    const pl = value - cost;
 
-    if (holdings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="loading">Žádná data</td></tr>';
+    const valueEl = document.getElementById('portfolio-value');
+    if (valueEl) valueEl.textContent = priced.length ? formatCurrency(value) : '—';
+
+    const plEl = document.getElementById('portfolio-pl');
+    if (plEl) {
+        plEl.textContent = priced.length ? formatSignedCurrency(pl) : '—';
+        plEl.className = pl >= 0 ? 'gain' : 'loss';
+    }
+}
+
+function updateLastFetched(iso) {
+    const el = document.getElementById('prices-updated');
+    if (!el) return;
+
+    if (!iso) {
+        el.textContent = 'Ceny zatím nebyly načteny';
+        el.classList.remove('stale');
         return;
     }
 
-    tbody.innerHTML = holdings.map(holding => {
-        if (holding.total_value === null || holding.total_cost === null) {
-            return `
-                <tr>
-                    <td><strong>${escapeHtml(holding.stock_name)}</strong></td>
-                    <td>-</td>
-                    <td>${formatCurrency(holding.total_cost)}</td>
-                    <td>-</td>
-                    <td>-</td>
-                </tr>
-            `;
-        }
+    const when = new Date(iso);
+    if (Number.isNaN(when.getTime())) {
+        el.textContent = 'Ceny zatím nebyly načteny';
+        return;
+    }
 
-        const profitLoss = holding.profit_loss || 0;
-        const pct = percentOfCost(profitLoss, holding.total_cost);
-        const cls = profitLoss >= 0 ? 'profit' : 'loss';
-        return `
-            <tr>
-                <td><strong>${escapeHtml(holding.stock_name)}</strong></td>
-                <td>${formatCurrency(holding.total_value)}</td>
-                <td>${formatCurrency(holding.total_cost)}</td>
-                <td class="${cls}">${formatSignedCurrency(profitLoss)}</td>
-                <td class="${cls}">${formatPercentage(pct)}</td>
-            </tr>
-        `;
-    }).join('');
+    const stamp = when.toLocaleString('cs-CZ', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    });
+    const ageHours = (Date.now() - when.getTime()) / 36e5;
+    el.innerHTML = `Ceny z Yahoo Finance · <span class="num">${escapeHtml(stamp)}</span>`;
+    el.classList.toggle('stale', ageHours > 24);
+    el.title = ageHours > 24
+        ? 'Ceny jsou starší než 24 hodin'
+        : '';
 }
 
 export function getAvailableSellQuantities() {
     const map = {};
     currentHoldings.forEach(h => { map[h.stock_name] = h.quantity; });
     return map;
+}
+
+export function repaintHoldingsCharts() {
+    if (!currentHoldings.length) return;
+    updateProfitLossChart(currentHoldings);
+    updatePortfolioDistributionChart(currentHoldings);
 }
 
 export async function loadHoldings() {
@@ -170,29 +166,29 @@ export async function loadHoldings() {
         const response = await fetch('/api/holdings');
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to load holdings'));
+            throw new Error(extractErrorMessage(data, 'Nepodařilo se načíst portfolio'));
         }
 
         currentHoldings = data.holdings;
+        lastUpdatedAt = data.prices_updated_at || null;
+
         renderHoldings();
-        displayProfitLoss(data.holdings);
+        updatePortfolioTotals(data.holdings);
         updateProfitLossChart(data.holdings);
         updatePortfolioDistributionChart(data.holdings);
+        updateLastFetched(lastUpdatedAt);
     } catch (error) {
-        handleError(error, 'Chyba při načítání portfolia: ' + error.message);
-        const tbody = document.getElementById('holdings-tbody');
-        if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="loading">Chyba při načítání dat</td></tr>';
+        handleError(error, 'Portfolio se nepodařilo načíst. Zkuste to znovu.');
+        const el = document.getElementById('holdings-tbody');
+        if (el) el.innerHTML = '<div class="error-text">Portfolio se nepodařilo načíst.</div>';
     } finally {
         setLoading('holdings-tbody', false);
     }
 }
 
 export function initHoldingsSort() {
-    document.querySelectorAll('#holdings-table th.sortable').forEach(th => {
-        const btn = th.querySelector('.sort-btn') || th;
-        btn.addEventListener('click', () => {
-            const key = th.dataset.sortKey;
-            if (key) handleHoldingsSort(key);
-        });
+    document.querySelectorAll('#holdings-table .cols [data-sort-key]').forEach(th => {
+        const btn = th.querySelector('button') || th;
+        btn.addEventListener('click', () => handleHoldingsSort(th.dataset.sortKey));
     });
 }

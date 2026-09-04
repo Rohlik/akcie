@@ -1,5 +1,5 @@
-// Formatting helpers + shared transaction-row renderer used by the portfolio
-// history, the Obchody table, and the standalone transactions page.
+// Formatting helpers shared across the portfolio list, the transaction
+// history and the add-transaction form.
 
 const currencyFmt = new Intl.NumberFormat('cs-CZ', {
     style: 'currency', currency: 'CZK',
@@ -12,7 +12,7 @@ export function formatCurrency(value) {
     return currencyFmt.format(value);
 }
 
-// Profit/loss columns always carry an explicit sign, matching formatPercentage.
+// Profit/loss columns always carry an explicit sign.
 export function formatSignedCurrency(value) {
     if (value === null || value === undefined) return '-';
     return `${value >= 0 ? '+' : ''}${currencyFmt.format(value)}`;
@@ -27,11 +27,6 @@ export function percentOfCost(value, totalCost) {
 export function formatNumber(value) {
     if (value === null || value === undefined) return '-';
     return numberFmt.format(value);
-}
-
-export function formatPercentage(value) {
-    if (value === null || value === undefined) return '-';
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
 // YYYY-MM-DD → DD.MM.YYYY
@@ -92,40 +87,4 @@ export function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
-}
-
-// Shared row renderer for transaction tables. Callers can choose whether to
-// display a "Stock" column (for cross-stock lists) and whether to include
-// inline edit/delete actions.
-export function renderTransactionRow(tx, options = {}) {
-    const { showStock = true, showActions = false } = options;
-    const typeClass = tx.type === 'buy' ? 'tx-type' : 'tx-type tx-type-sell';
-    const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
-    const fees = tx.fees || 0;
-    const totalValue = transactionTotalValue(tx);
-    const formattedDate = formatIsoDateCs(tx.date);
-    const safeStock = escapeHtml(tx.stock_name);
-
-    const cells = [
-        `<td class="tx-date">${formattedDate}</td>`,
-        `<td><span class="${typeClass}">${typeText}</span></td>`,
-    ];
-    if (showStock) cells.push(`<td><strong>${safeStock}</strong></td>`);
-    cells.push(
-        `<td class="tx-price">${formatCurrency(tx.price)}</td>`,
-        `<td class="tx-quantity">${formatNumber(tx.quantity)}</td>`,
-        `<td class="tx-fees">${fees > 0 ? formatCurrency(fees) : '-'}</td>`,
-        `<td class="tx-total">${formatCurrency(totalValue)}</td>`,
-    );
-
-    if (showActions) {
-        cells.push(
-            '<td>' +
-                '<button class="btn-edit" data-action="edit-tx" title="Upravit"><span class="icon-pencil">✏️</span></button>' +
-                '<button class="btn-delete" data-action="delete-tx" title="Smazat">🗑️</button>' +
-            '</td>'
-        );
-    }
-
-    return `<tr id="tx-row-${tx.id}" data-tx-id="${tx.id}" data-tx-type="${tx.type}" data-tx-stock="${safeStock}">${cells.join('')}</tr>`;
 }

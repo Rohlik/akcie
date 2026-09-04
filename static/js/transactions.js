@@ -1,11 +1,11 @@
-// Transaction CRUD + per-stock history expansion + Obchody (20 most recent).
+// Transaction CRUD, per-stock history expansion, and ticker rename.
 //
 // DOM events use delegation via data-action attributes on rendered rows, so
 // no inline onclick is required anywhere.
 
 import {
     formatCurrency, formatIsoDateCs, parseCsDateToIso,
-    transactionTotalValue, renderTransactionRow, csDatePickerOptions,
+    transactionTotalValue, csDatePickerOptions, escapeHtml,
 } from './format.js';
 import { csrfFetch, readJson, extractErrorMessage } from './api.js';
 import { showMessage, handleError } from './ui.js';
@@ -17,11 +17,27 @@ function reloadDataAfterMutation() {
         loadHoldings(),
         loadTaxInfo(),
         loadYearlyProfitLoss(),
-        loadRecentTransactions(),
     ]);
 }
 
-// --- Stock history (inside Portfolio expandable rows) ------------------------
+// --- Stock history -----------------------------------------------------------
+
+function renderHistoryRow(tx) {
+    const typeText = tx.type === 'buy' ? 'Nákup' : 'Prodej';
+    const fees = tx.fees || 0;
+    return `
+        <div class="tx" data-tx-id="${tx.id}" data-tx-stock="${escapeHtml(tx.stock_name)}">
+            <span class="dim">${formatIsoDateCs(tx.date)}</span>
+            <span class="tag">${typeText}</span>
+            <span>${formatCurrency(tx.price)}</span>
+            <span class="dim">${tx.quantity} ks</span>
+            <span>${formatCurrency(transactionTotalValue(tx))}</span>
+            <span class="tx-actions">
+                <button type="button" class="btn-edit" data-action="edit-tx" title="Upravit" aria-label="Upravit transakci">✎</button>
+                <button type="button" class="btn-delete" data-action="delete-tx" title="Smazat" aria-label="Smazat transakci">🗑</button>
+            </span>
+        </div>`;
+}
 
 async function loadStockHistory(stockName, contentEl) {
     if (!contentEl) return;
@@ -30,35 +46,19 @@ async function loadStockHistory(stockName, contentEl) {
         const response = await fetch(`/api/transactions?stock=${encodeURIComponent(stockName)}`);
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to load history'));
+            throw new Error(extractErrorMessage(data, 'Nepodařilo se načíst historii'));
         }
 
         const transactions = data.transactions || [];
+        contentEl.classList.remove('loading');
+        contentEl.dataset.loaded = '1';
+
         if (transactions.length === 0) {
-            contentEl.classList.remove('loading');
-            contentEl.innerHTML = '<p>Žádné transakce pro tuto akcii.</p>';
+            contentEl.innerHTML = '<p class="dim">Žádné transakce pro tuto akcii.</p>';
             return;
         }
 
-        contentEl.classList.remove('loading');
-        contentEl.innerHTML = `
-            <table class="history-table">
-                <thead>
-                    <tr>
-                        <th scope="col">Datum</th>
-                        <th scope="col">Typ</th>
-                        <th scope="col" class="num">Cena (CZK)</th>
-                        <th scope="col" class="num">Množství</th>
-                        <th scope="col" class="num">Poplatky (CZK)</th>
-                        <th scope="col" class="num">Celková hodnota</th>
-                        <th scope="col" class="col-actions">Akce</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${transactions.map(tx => renderTransactionRow(tx, { showStock: false, showActions: true })).join('')}
-                </tbody>
-            </table>
-        `;
+        contentEl.innerHTML = `<div class="txs">${transactions.map(renderHistoryRow).join('')}</div>`;
     } catch (error) {
         console.error('Error loading stock history:', error);
         contentEl.classList.remove('loading');
@@ -66,7 +66,24 @@ async function loadStockHistory(stockName, contentEl) {
     }
 }
 
-// --- Ticker rename -----------------------------------------------------------
+function toggleHistory(button) {
+    const drawer = document.getElementById(button.dataset.historyId);
+    if (!drawer) return;
+
+    const lot = button.closest('.lot');
+    const open = button.getAttribute('aria-expanded') === 'true';
+
+    button.setAttribute('aria-expanded', String(!open));
+    drawer.style.gridTemplateRows = open ? '0fr' : '1fr';
+    if (lot) lot.classList.toggle('open', !open);
+
+    const contentEl = drawer.querySelector('.history-content');
+    if (!open && contentEl && !contentEl.dataset.loaded) {
+        loadStockHistory(button.dataset.stock, contentEl);
+    }
+}
+
+// --- Ticker rename -------------------------------------------------------------
 
 async function postRename(oldName, newName, confirmMerge) {
     const response = await csrfFetch('/api/stock/rename', {
@@ -98,7 +115,7 @@ async function renameStock(oldName) {
         }
 
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to rename ticker'));
+            throw new Error(extractErrorMessage(data, 'Přejmenování se nezdařilo'));
         }
 
         showMessage(
@@ -109,126 +126,79 @@ async function renameStock(oldName) {
         );
         await reloadDataAfterMutation();
     } catch (error) {
-        handleError(error, 'Chyba při přejmenování tickeru: ' + error.message);
+        handleError(error, 'Ticker se nepodařilo přejmenovat: ' + error.message);
     }
 }
 
-function toggleHistory(historyId, stockName) {
-    const historyRow = document.getElementById(historyId);
-    if (!historyRow) return;
-    const visible = historyRow.style.display !== 'none';
-    const toggle = document.querySelector(`[data-action="toggle-history"][aria-controls="${historyId}"]`);
-    const icon = toggle?.querySelector('.expand-icon');
-
-    if (visible) {
-        historyRow.style.display = 'none';
-        if (icon) icon.textContent = '▼';
-        toggle?.setAttribute('aria-expanded', 'false');
-        return;
-    }
-
-    historyRow.style.display = 'table-row';
-    if (icon) icon.textContent = '▲';
-    toggle?.setAttribute('aria-expanded', 'true');
-
-    const contentEl = historyRow.querySelector('.history-content > div');
-    if (contentEl && contentEl.textContent.trim() === 'Načítání...') {
-        loadStockHistory(stockName, contentEl);
-    }
-}
-
-// --- Edit / save / delete ----------------------------------------------------
+// --- Edit / save / delete --------------------------------------------------------
 
 function convertRowToEditMode(row, transaction) {
     row.classList.add('edit-mode');
-    row.dataset.originalDate = transaction.date;
-    row.dataset.originalPrice = transaction.price;
-    row.dataset.originalQuantity = transaction.quantity;
-    row.dataset.originalFees = transaction.fees || 0;
-
     const displayDate = formatIsoDateCs(transaction.date);
 
-    const typeClass = transaction.type === 'buy' ? 'tx-type' : 'tx-type tx-type-sell';
     row.innerHTML = `
-        <td>
-            <input type="text" class="edit-date" value="${displayDate}" placeholder="DD.MM.YYYY"
-                   aria-label="Datum">
-        </td>
-        <td><span class="${typeClass}">${transaction.type === 'buy' ? 'Nákup' : 'Prodej'}</span></td>
-        <td>
-            <input type="number" class="edit-price" value="${transaction.price}" step="0.01" min="0"
-                   aria-label="Cena v CZK">
-        </td>
-        <td>
-            <input type="number" class="edit-quantity" value="${transaction.quantity}" min="1"
-                   aria-label="Množství">
-        </td>
-        <td>
-            <input type="number" class="edit-fees" value="${transaction.fees || 0}" step="0.01" min="0"
-                   aria-label="Poplatky v CZK">
-        </td>
-        <td class="tx-total">-</td>
-        <td>
+        <span><input type="text" class="edit-date" value="${displayDate}" aria-label="Datum"></span>
+        <span class="tag">${transaction.type === 'buy' ? 'Nákup' : 'Prodej'}</span>
+        <span><input type="number" class="edit-price" value="${transaction.price}" step="0.01" min="0" aria-label="Cena v Kč"></span>
+        <span><input type="number" class="edit-quantity" value="${transaction.quantity}" min="1" aria-label="Množství"></span>
+        <span class="tx-total">—</span>
+        <span class="tx-actions">
             <button type="button" class="btn-save" data-action="save-tx" title="Uložit" aria-label="Uložit">✓</button>
             <button type="button" class="btn-cancel" data-action="cancel-tx" title="Zrušit" aria-label="Zrušit">✕</button>
-        </td>
+        </span>
     `;
 
     const dateInput = row.querySelector('.edit-date');
-    if (dateInput) flatpickr(dateInput, csDatePickerOptions(transaction.date));
+    if (dateInput && window.flatpickr) flatpickr(dateInput, csDatePickerOptions(transaction.date));
 
     const updateTotal = () => {
         const price = parseFloat(row.querySelector('.edit-price').value) || 0;
         const quantity = parseInt(row.querySelector('.edit-quantity').value, 10) || 0;
-        const fees = parseFloat(row.querySelector('.edit-fees').value) || 0;
-        const total = transactionTotalValue({ type: transaction.type, price, quantity, fees });
+        const total = transactionTotalValue({ type: transaction.type, price, quantity, fees: transaction.fees || 0 });
         row.querySelector('.tx-total').textContent = formatCurrency(total);
     };
-
-    row.querySelector('.edit-price').addEventListener('input', updateTotal);
-    row.querySelector('.edit-quantity').addEventListener('input', updateTotal);
-    row.querySelector('.edit-fees').addEventListener('input', updateTotal);
+    row.querySelectorAll('.edit-price, .edit-quantity').forEach(el => el.addEventListener('input', updateTotal));
     updateTotal();
 }
 
 async function startEdit(row) {
+    if (row.classList.contains('edit-mode')) return;
     const txId = parseInt(row.dataset.txId, 10);
     const stockName = row.dataset.txStock;
-    if (row.classList.contains('edit-mode')) return;
 
     try {
         const response = await fetch(`/api/transactions?stock=${encodeURIComponent(stockName)}`);
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to load transaction'));
+            throw new Error(extractErrorMessage(data, 'Nepodařilo se načíst transakci'));
         }
         const transaction = (data.transactions || []).find(tx => tx.id === txId);
         if (!transaction) {
             showMessage('Transakce nenalezena', 'error');
             return;
         }
+        row.dataset.txFees = transaction.fees || 0;
         convertRowToEditMode(row, transaction);
     } catch (error) {
-        handleError(error, 'Chyba při úpravě transakce: ' + error.message);
+        handleError(error, 'Transakci se nepodařilo otevřít: ' + error.message);
     }
 }
 
 async function saveEdit(row) {
     const txId = parseInt(row.dataset.txId, 10);
     try {
-        const dateInput = row.querySelector('.edit-date');
-        const iso = parseCsDateToIso(dateInput.value);
+        const iso = parseCsDateToIso(row.querySelector('.edit-date').value);
         if (!iso) {
-            showMessage('Neplatný formát data. Použijte DD.MM.YYYY.', 'error');
+            showMessage('Zadejte datum ve formátu DD.MM.RRRR.', 'error');
             return;
         }
 
         const price = parseFloat(row.querySelector('.edit-price').value);
         const quantity = parseInt(row.querySelector('.edit-quantity').value, 10);
-        const fees = parseFloat(row.querySelector('.edit-fees').value) || 0;
+        const fees = parseFloat(row.dataset.txFees) || 0;
 
-        if (!price || price <= 0 || !quantity || quantity <= 0 || fees < 0) {
-            showMessage('Neplatné hodnoty', 'error');
+        if (!price || price <= 0 || !quantity || quantity <= 0) {
+            showMessage('Cena i množství musí být větší než 0.', 'error');
             return;
         }
 
@@ -238,73 +208,40 @@ async function saveEdit(row) {
         });
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to update transaction'));
+            throw new Error(extractErrorMessage(data, 'Uložení se nezdařilo'));
         }
 
-        showMessage('Transakce byla úspěšně aktualizována', 'success');
+        showMessage('Transakce uložena', 'success');
         await reloadDataAfterMutation();
     } catch (error) {
-        handleError(error, 'Chyba při ukládání transakce: ' + error.message);
+        handleError(error, 'Transakci se nepodařilo uložit: ' + error.message);
     }
 }
 
 async function deleteRow(row) {
-    if (!confirm('Opravdu chcete smazat tuto transakci? Tato akce je nevratná.')) return;
+    if (!confirm('Opravdu smazat tuto transakci? Akce je nevratná.')) return;
     const txId = parseInt(row.dataset.txId, 10);
     try {
         const response = await csrfFetch(`/api/transaction/${txId}`, { method: 'DELETE' });
         const data = await readJson(response);
         if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to delete transaction'));
+            throw new Error(extractErrorMessage(data, 'Smazání se nezdařilo'));
         }
-        showMessage('Transakce byla úspěšně smazána', 'success');
+        showMessage('Transakce smazána', 'success');
         await reloadDataAfterMutation();
     } catch (error) {
-        handleError(error, 'Chyba při mazání transakce: ' + error.message);
+        handleError(error, 'Transakci se nepodařilo smazat: ' + error.message);
     }
 }
 
 async function cancelEdit(row) {
-    await reloadVisibleHistoryFor(row.dataset.txStock);
-}
-
-async function reloadVisibleHistoryFor(stockName) {
-    // Used by cancelEdit: if the per-stock history is currently expanded,
-    // re-render it so the canceled row returns to its non-edit state.
-    const matchingRow = document.querySelector(
-        `.holding-row[data-stock="${stockName}"] + .history-row[style*="table-row"] .history-content > div`
+    const contentEl = document.querySelector(
+        `.history-content[data-history-for="${row.dataset.txStock}"]`
     );
-    if (matchingRow) await loadStockHistory(stockName, matchingRow);
+    if (contentEl) await loadStockHistory(row.dataset.txStock, contentEl);
 }
 
-// --- Recent transactions (Obchody) -------------------------------------------
-
-export async function loadRecentTransactions() {
-    const tbody = document.getElementById('recent-transactions-tbody');
-    if (!tbody) return;
-    try {
-        const response = await fetch('/api/transactions?limit=20');
-        const data = await readJson(response);
-        if (!response.ok) {
-            throw new Error(extractErrorMessage(data, 'Failed to load transactions'));
-        }
-
-        const transactions = data.transactions || [];
-        if (transactions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="loading">Žádné transakce</td></tr>';
-            return;
-        }
-
-        tbody.innerHTML = transactions
-            .map(tx => renderTransactionRow(tx, { showStock: true, showActions: false }))
-            .join('');
-    } catch (error) {
-        console.error('Error loading recent transactions:', error);
-        tbody.innerHTML = '<tr><td colspan="7" class="loading">Chyba při načítání transakcí</td></tr>';
-    }
-}
-
-// --- Event delegation --------------------------------------------------------
+// --- Event delegation -------------------------------------------------------------
 
 export function initTransactionInteractions() {
     document.addEventListener('click', async event => {
@@ -312,16 +249,18 @@ export function initTransactionInteractions() {
         if (!actionEl) return;
 
         const action = actionEl.dataset.action;
-        if (action === 'toggle-history') {
-            toggleHistory(actionEl.dataset.historyId, actionEl.dataset.stock);
-            return;
-        }
+
         if (action === 'rename-stock') {
+            event.stopPropagation();
             await renameStock(actionEl.dataset.stock);
             return;
         }
+        if (action === 'toggle-history') {
+            toggleHistory(actionEl);
+            return;
+        }
 
-        const row = actionEl.closest('tr[data-tx-id]');
+        const row = actionEl.closest('[data-tx-id]');
         if (!row) return;
 
         switch (action) {
@@ -331,6 +270,16 @@ export function initTransactionInteractions() {
             case 'delete-tx': await deleteRow(row); break;
             default: break;
         }
+    });
+
+    // The rename affordance sits inside the expand button, so it needs its own
+    // keyboard path - Enter on it must not also toggle the drawer.
+    document.addEventListener('keydown', async event => {
+        const el = event.target.closest('[data-action="rename-stock"]');
+        if (!el || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        await renameStock(el.dataset.stock);
     });
 }
 

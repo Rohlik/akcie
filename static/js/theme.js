@@ -55,31 +55,11 @@ export function isDark() {
     return resolveTheme(currentMode) === 'dark';
 }
 
-// Chart colors come from the same CSS tokens as the rest of the page, so the
-// palette has one source of truth.
+// The chart palette comes from the same CSS tokens as the rest of the page,
+// so it follows the theme and has one source of truth.
 export function cssToken(name, fallback = '') {
     const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return value || fallback;
-}
-
-export function getChartTextColor() {
-    return cssToken('--ink-muted', isDark() ? '#9aa4b0' : '#5c6672');
-}
-
-export function getChartGridColor() {
-    return cssToken('--chart-grid', isDark() ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)');
-}
-
-export function getGainColor() {
-    return cssToken('--gain', '#0b6e63');
-}
-
-export function getLossColor() {
-    return cssToken('--loss', '#b42318');
-}
-
-export function getSurfaceColor() {
-    return cssToken('--surface', '#fdfdfb');
 }
 
 export function getChartPalette() {
@@ -102,10 +82,6 @@ export function initTheme() {
     currentMode = (saved === 'light' || saved === 'dark' || saved === 'auto') ? saved : 'auto';
     applyTheme(resolveTheme(currentMode));
     updateButton();
-
-    if (typeof Chart !== 'undefined') {
-        Chart.defaults.color = getChartTextColor();
-    }
 
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (currentMode === 'auto') {

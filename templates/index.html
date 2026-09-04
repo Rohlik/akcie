@@ -1,245 +1,174 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="dashboard">
-    <!-- Transaction Form -->
-    <section class="card">
-        <h2>Přidat transakci</h2>
-        <form id="transaction-form">
-            <div class="form-group">
-                <label for="type">Typ transakce:</label>
-                <select id="type" name="type" required>
-                    <option value="buy">Nákup</option>
-                    <option value="sell">Prodej</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="stock_name" id="stock_name_label">Název akcie:</label>
-                <label for="stock_name_select" id="stock_name_select_label" hidden>Název akcie:</label>
-                <input type="text" id="stock_name" name="stock_name" placeholder="např. TABAK.PR" required>
-                <select id="stock_name_select" name="stock_name_select" hidden required>
-                    <option value="">Vyberte akcii...</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label for="date">Datum:</label>
-                <input type="text" id="date" name="date" placeholder="DD.MM.YYYY" required>
-            </div>
-            
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="price">Cena (CZK):</label>
-                    <input type="number" id="price" name="price" step="0.01" min="0" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="quantity">Množství:</label>
-                    <input type="number" id="quantity" name="quantity" min="1" required>
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label for="fees">Poplatky (CZK):</label>
-                <input type="number" id="fees" name="fees" step="0.01" min="0" value="0" placeholder="0.00">
-                <small class="field-hint">Poplatky burze a další související náklady</small>
-            </div>
-            
-            <button type="submit" id="submit-btn" class="btn btn-primary">Přidat transakci</button>
-        </form>
-    </section>
-    
-    <!-- Tax Information Card -->
-    <section class="card tax-info">
-        <div class="card-header">
-            <h2>Daňové informace</h2>
-            <div class="tax-info-header-actions">
-                <div class="tax-year-selector">
-                    <label for="tax-year-select" class="tax-year-label">Rok:</label>
-                    <select id="tax-year-select" class="tax-year-select" aria-label="Výběr daňového roku">
-                        <option value="">Načítání...</option>
-                    </select>
-                </div>
-                <a href="/api/export/tax-report" class="btn btn-secondary">Daňová zpráva (CSV)</a>
-                <a href="/api/export/transactions" class="btn btn-secondary">Transakce (CSV)</a>
+
+<!-- Hero: the tax allowance, then the three totals it depends on -->
+<section class="hero">
+    <div class="glass ringcard">
+        <div>
+            <svg viewBox="0 0 150 150" width="122" height="122" role="img" aria-labelledby="ring-title">
+                <title id="ring-title">Vyčerpání osvobozené kapacity</title>
+                <circle cx="75" cy="75" r="60" fill="none" stroke="var(--sunken)" stroke-width="13"></circle>
+                <circle id="allowance-ring" class="ring-fill" cx="75" cy="75" r="60" fill="none"
+                        stroke="var(--accent)" stroke-width="13" stroke-linecap="round"
+                        stroke-dasharray="0 377" transform="rotate(-90 75 75)"></circle>
+                <text id="allowance-ring-pct" x="75" y="70" text-anchor="middle"
+                      font-family="JetBrains Mono, monospace" font-size="21" font-weight="700"
+                      fill="var(--accent)">—</text>
+                <text x="75" y="88" text-anchor="middle" font-family="Archivo, sans-serif"
+                      font-size="9" letter-spacing="1.2" fill="var(--muted)">VYČERPÁNO</text>
+            </svg>
+        </div>
+        <div>
+            <div class="k">Osvobozeno zbývá</div>
+            <div class="ringfig" id="remaining-capacity">—</div>
+            <div class="ringsub">z limitu <span id="tax-free-limit">—</span> pro rok <span id="tax-selected-year-label">—</span></div>
+        </div>
+    </div>
+
+    <div class="statgrid">
+        <div class="glass stat">
+            <div class="k">Hodnota portfolia</div>
+            <div class="statfig" id="portfolio-value">—</div>
+            <div class="statsub"><span id="portfolio-pl">—</span> od nákupu</div>
+        </div>
+        <div class="glass stat">
+            <div class="k">Po tříletém testu</div>
+            <div class="statfig gain" id="three-year-value">—</div>
+            <div class="statsub"><span id="three-year-share">—</span> portfolia, prodej bez daně</div>
+        </div>
+        <div class="glass stat">
+            <div class="k">Zdanitelné prodeje</div>
+            <div class="statfig" id="current-year-sales">—</div>
+            <div class="statsub">
+                <span id="current-year-sales-three-years">—</span> osvobozeno časovým testem
             </div>
         </div>
-        <div id="tax-info-content">
+    </div>
+</section>
+
+<!-- Portfolio -->
+<section class="glass panel">
+    <div class="card-header">
+        <h2>Portfolio</h2>
+        <span class="statsub">Rozklikněte pozici pro historii transakcí</span>
+    </div>
+
+    <div id="holdings-table">
+        <div class="cols" role="row">
+            <span role="columnheader" data-sort-key="stock_name" aria-sort="none"><button type="button">Akcie <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="quantity" aria-sort="none"><button type="button">Ks <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="three_year_quantity" aria-sort="none"><button type="button">Po testu <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="average_purchase_price" aria-sort="none"><button type="button">Prům. cena <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="current_price" aria-sort="none"><button type="button">Aktuální <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="total_value" aria-sort="none"><button type="button">Hodnota <span class="sort-indicator" aria-hidden="true"></span></button></span>
+            <span role="columnheader" data-sort-key="profit_loss" aria-sort="none"><button type="button">Zisk/Ztráta <span class="sort-indicator" aria-hidden="true"></span></button></span>
+        </div>
+        <div id="holdings-tbody">
+            <div class="loading">Načítání…</div>
+        </div>
+    </div>
+</section>
+
+<div class="lower">
+    <div class="stack">
+        <section class="glass panel panel-pad">
+            <h2 style="margin-bottom: 16px">Zisk a ztráta podle pozice</h2>
+            <div class="bars" id="position-bars"><div class="loading">Načítání…</div></div>
+        </section>
+
+        <section class="glass panel panel-pad">
+            <h2 style="margin-bottom: 16px">Realizovaný zisk podle roku</h2>
+            <div class="bars" id="year-bars"><div class="loading">Načítání…</div></div>
+        </section>
+
+        <section class="glass panel panel-pad">
+            <h2 style="margin-bottom: 14px">Daňové shrnutí</h2>
             <div class="info-item">
-                <span class="label">Prodeje v roce <span id="tax-selected-year-label">-</span> (bez akcií držených &gt;3 roky):</span>
-                <span class="value" id="current-year-sales">-</span>
+                <span class="label">Prodeje v roce <span class="tax-year-ref">—</span> (bez akcií po testu)</span>
+                <span class="value" id="sales-taxable">—</span>
             </div>
             <div class="info-item">
-                <span class="label">Prodeje v roce <span id="tax-selected-year-label-2">-</span> (akcie držené &gt;3 roky):</span>
-                <span class="value highlight-green" id="current-year-sales-three-years">-</span>
+                <span class="label">Prodeje v roce <span class="tax-year-ref">—</span> (akcie po testu)</span>
+                <span class="value gain" id="sales-exempt">—</span>
             </div>
             <div class="info-item">
-                <span class="label">Zbývající daňově osvobozená kapacita:</span>
-                <span class="value highlight" id="remaining-capacity">-</span>
-            </div>
-            <div class="info-item">
-                <span class="label">Hodnota akcií držených >3 roky:</span>
-                <span class="value highlight-green" id="three-year-value">-</span>
+                <span class="label">Zbývající osvobozená kapacita</span>
+                <span class="value" id="remaining-capacity-2">—</span>
             </div>
             <p class="card-note">
-                Prodeje akcií, které prošly tříletým časovým testem, jsou daňově
-                osvobozené a nepočítají se do ročního limitu.
+                Prodeje akcií, které prošly tříletým časovým testem, jsou osvobozené
+                a nepočítají se do ročního limitu.
             </p>
-        </div>
-    </section>
-    
-    <!-- Holdings Table -->
-    <section class="card">
-        <div class="card-header">
-            <h2>Portfolio</h2>
-            <button id="update-prices-btn" class="btn btn-secondary">Aktualizovat ceny</button>
-        </div>
-        <div id="holdings-container">
-            <table id="holdings-table">
-                <caption class="visually-hidden">Aktuální pozice v portfoliu</caption>
-                <colgroup>
-                    <col style="width: 18%">
-                    <col style="width: 11%">
-                    <col style="width: 13%">
-                    <col style="width: 16%">
-                    <col style="width: 14%">
-                    <col style="width: 14%">
-                    <col style="width: 14%">
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th scope="col" class="sortable" data-sort-key="stock_name" aria-sort="none"><button type="button" class="sort-btn">Akcie <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="quantity" aria-sort="none"><button type="button" class="sort-btn">Množství <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="three_year_quantity" aria-sort="none"><button type="button" class="sort-btn">Po časovém testu <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="average_purchase_price" aria-sort="none"><button type="button" class="sort-btn">Prům. nákupní cena <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="current_price" aria-sort="none"><button type="button" class="sort-btn">Aktuální cena <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="total_value" aria-sort="none"><button type="button" class="sort-btn">Celková hodnota <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                        <th scope="col" class="sortable" data-sort-key="profit_loss" aria-sort="none"><button type="button" class="sort-btn">Zisk/Ztráta <span class="sort-indicator" aria-hidden="true"></span></button></th>
-                    </tr>
-                </thead>
-                <tbody id="holdings-tbody">
-                    <tr>
-                        <td colspan="7" class="loading">Načítání dat...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </section>
+        </section>
+    </div>
 
-    <!-- Recent Transactions (Obchody) -->
-    <section class="card">
-        <div class="card-header">
-            <h2>Poslední obchody</h2>
-            <span class="card-meta">20 nejnovějších</span>
-        </div>
-        <div id="recent-transactions-container">
-            <table class="history-table" id="recent-transactions-table">
-                <caption class="visually-hidden">Dvacet nejnovějších transakcí</caption>
-                <thead>
-                    <tr>
-                        <th scope="col">Datum</th>
-                        <th scope="col">Typ</th>
-                        <th scope="col">Akcie</th>
-                        <th scope="col" class="num">Cena (CZK)</th>
-                        <th scope="col" class="num">Množství</th>
-                        <th scope="col" class="num">Poplatky (CZK)</th>
-                        <th scope="col" class="num">Celková hodnota</th>
-                    </tr>
-                </thead>
-                <tbody id="recent-transactions-tbody">
-                    <tr>
-                        <td colspan="7" class="loading">Načítání...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </section>
-    
-    <!-- Profit/Loss Visualization -->
-    <section class="card">
-        <div class="card-header">
-            <h2>Přehled zisků a ztrát</h2>
-            <div class="chart-toggle">
-                <button class="btn-toggle active" data-toggle="profit-loss" data-view="chart">Graf</button>
-                <button class="btn-toggle" data-toggle="profit-loss" data-view="table">Tabulka</button>
+    <div class="stack">
+        <section class="glass panel panel-pad rail-form" id="add-panel">
+            <div class="card-header">
+                <h2>Přidat transakci</h2>
+                <button type="button" class="btn" id="sheet-close" hidden aria-label="Zavřít">Zavřít</button>
             </div>
-        </div>
-        <div id="profit-loss-container">
-            <div id="profit-loss-chart-container" style="display: block;">
-                <div class="chart-container-wrapper">
-                    <div class="chart-container">
-                        <canvas id="profit-loss-chart"></canvas>
+            <form id="transaction-form" novalidate>
+                <div class="fields">
+                    <div class="seg" role="group" aria-label="Typ transakce">
+                        <button type="button" id="type-buy" aria-pressed="true">Nákup</button>
+                        <button type="button" id="type-sell" aria-pressed="false">Prodej</button>
                     </div>
-                </div>
-            </div>
-            <div id="profit-loss-table-container" style="display: none;">
-                <table id="profit-loss-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Akcie</th>
-                            <th scope="col">Celková hodnota</th>
-                            <th scope="col">Celkové náklady</th>
-                            <th scope="col">Zisk/Ztráta</th>
-                            <th scope="col">Zisk/Ztráta %</th>
-                        </tr>
-                    </thead>
-                    <tbody id="profit-loss-tbody">
-                        <tr>
-                            <td colspan="5" class="loading">Načítání dat...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
-    
-    <!-- Portfolio Distribution Chart -->
-    <section class="card">
-        <h2>Rozložení portfolia</h2>
-        <div class="distribution-layout">
-            <div class="chart-container-wrapper">
-                <div class="chart-container">
-                    <canvas id="portfolio-distribution-chart"></canvas>
-                </div>
-            </div>
-            <div id="portfolio-distribution-legend" class="distribution-legend"></div>
-        </div>
-    </section>
-    
-    <!-- Yearly Profit/Loss -->
-    <section class="card">
-        <div class="card-header">
-            <h2>Zisk/Ztráta podle kalendářního roku (prodané akcie)</h2>
-            <div class="chart-toggle">
-                <button class="btn-toggle active" data-toggle="yearly-profit-loss" data-view="chart">Graf</button>
-                <button class="btn-toggle" data-toggle="yearly-profit-loss" data-view="table">Tabulka</button>
-            </div>
-        </div>
-        <div id="yearly-profit-loss-container">
-            <div id="yearly-profit-loss-chart-container" style="display: block;">
-                <canvas id="yearly-profit-loss-chart"></canvas>
-            </div>
-            <div id="yearly-profit-loss-table-container" style="display: none;">
-                <table id="yearly-profit-loss-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">Rok</th>
-                            <th scope="col">Celkové prodeje</th>
-                            <th scope="col">Celkové náklady</th>
-                            <th scope="col">Zisk/Ztráta</th>
-                            <th scope="col">Zisk/Ztráta %</th>
-                        </tr>
-                    </thead>
-                    <tbody id="yearly-profit-loss-tbody">
-                        <tr>
-                            <td colspan="5" class="loading">Načítání dat...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
-</div>
-{% endblock %}
+                    <input type="hidden" id="type" name="type" value="buy">
 
+                    <div class="form-group">
+                        <label for="stock_name" id="stock_name_label">Akcie <span class="req" aria-hidden="true">•</span></label>
+                        <label for="stock_name_select" id="stock_name_select_label" hidden>Akcie <span class="req" aria-hidden="true">•</span></label>
+                        <input type="text" id="stock_name" name="stock_name" placeholder="např. TABAK.PR" required aria-required="true">
+                        <select id="stock_name_select" name="stock_name_select" hidden required aria-required="true">
+                            <option value="">Vyberte akcii…</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="date">Datum <span class="req" aria-hidden="true">•</span></label>
+                        <input type="text" id="date" name="date" placeholder="DD.MM.RRRR" required aria-required="true">
+                    </div>
+
+                    <div class="pair">
+                        <div class="form-group">
+                            <label for="price">Cena (Kč) <span class="req" aria-hidden="true">•</span></label>
+                            <input type="number" id="price" name="price" step="0.01" min="0" placeholder="0,00" required aria-required="true">
+                        </div>
+                        <div class="form-group">
+                            <label for="quantity">Množství <span class="req" aria-hidden="true">•</span></label>
+                            <input type="number" id="quantity" name="quantity" min="1" placeholder="0" required aria-required="true">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fees">Poplatky (Kč) <span class="optional">nepovinné</span></label>
+                        <input type="number" id="fees" name="fees" step="0.01" min="0" value="0">
+                        <span class="field-hint">Poplatky burze a další související náklady</span>
+                    </div>
+
+                    <p class="field-hint"><span class="req" aria-hidden="true">•</span> Povinné pole</p>
+                    <button type="submit" id="submit-btn" class="btn-primary">Přidat nákup</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="glass panel panel-pad">
+            <div class="card-header">
+                <h2>Rozložení</h2>
+                <span class="statsub num" id="donut-total">—</span>
+            </div>
+            <div class="donut">
+                <div class="donut-wrap">
+                    <svg id="distribution-chart" viewBox="0 0 160 160" width="150" height="150" role="img" aria-labelledby="donut-title">
+                        <title id="donut-title">Rozložení portfolia podle pozice</title>
+                    </svg>
+                </div>
+                <div class="dlist" id="distribution-legend"></div>
+            </div>
+        </section>
+    </div>
+</div>
+
+{% endblock %}

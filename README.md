@@ -3,8 +3,8 @@
 Webová aplikace pro sledování osobních akcií z Pražské burzy s daňovou optimalizací podle českých zákonů. Vhodná pro drobné investory.
 
 ## Foto ukázky
-<img src="ukazka-transakce.png" alt="Ukázka - detail transakce" width="35%">  
-<img src="ukazka-piechart.png" alt="Ukázka - graf zisků a ztrát" width="35%">
+<img src="ukazka-transakce.png" alt="Ukázka - portfolio s daňovým označením pozic" width="60%">  
+<img src="ukazka-piechart.png" alt="Ukázka - rozložení portfolia" width="35%">
 
 ## Funkce
 
