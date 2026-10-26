@@ -36,8 +36,8 @@ def sanitize_input(text: str, max_length: Optional[int] = None) -> str:
     return text
 
 def sanitize_stock_name(stock_name: str) -> str:
-    """Sanitize stock name specifically"""
-    return sanitize_input(stock_name, max_length=Config.MAX_STOCK_NAME_LENGTH)
+    """Sanitize stock name specifically. Uppercased so colt.PR and COLT.PR are one position."""
+    return sanitize_input(stock_name, max_length=Config.MAX_STOCK_NAME_LENGTH).upper()
 
 def validate_date(date_str: str, allow_future: bool = False) -> Tuple[bool, Optional[str]]:
     """

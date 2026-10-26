@@ -686,6 +686,9 @@ input[type="text"], input[type="number"], input[type="date"], select {
     transition: border-color .2s, box-shadow .2s;
 }
 input::placeholder { color: var(--faint); opacity: .7; }
+/* The server uppercases tickers; show what will be saved. */
+#stock_name { text-transform: uppercase; }
+#stock_name::placeholder { text-transform: none; }
 input:focus, select:focus {
     outline: none;
     border-color: var(--accent);

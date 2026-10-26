@@ -97,7 +97,7 @@ async function renameStock(oldName) {
     const input = prompt(`Přejmenovat ticker "${oldName}" na:`, oldName);
     if (input === null) return;
 
-    const newName = input.trim();
+    const newName = input.trim().toUpperCase();
     if (!newName || newName === oldName) return;
 
     try {
