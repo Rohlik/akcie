@@ -877,6 +877,8 @@ footer .num { font-size: 12px; }
         background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 84%, #fff), var(--accent));
         box-shadow: 0 10px 30px -10px rgba(0, 0, 0, .8);
     }
+    /* The container's z-index would trap the sheet below the scrim. */
+    .sheet-open .container { z-index: auto; }
     .sheet-open .rail-form {
         display: block;
         position: fixed;
